@@ -16,7 +16,7 @@ pub type Message {
     subject: process.Subject(pipe.Message),
   )
 
-  CleanPipe(name: String, id: Int)
+  CleanPipe(name: String, remove_id: Int)
 }
 
 pub type Subject = process.Subject(Message)
@@ -59,14 +59,14 @@ fn handle_message(
       |> actor.continue
     }
 
-    CleanPipe(name, id) -> {
+    CleanPipe(name, remove_id) -> {
       dict.upsert(
         state,
         name,
         fn(subjects) {
           subjects
           |> option.lazy_unwrap(dict.new)
-          |> dict.delete(id)
+          |> dict.delete(remove_id)
         },
       )
       |> actor.continue

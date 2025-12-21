@@ -28,14 +28,14 @@ fn listen_on_pipe(
       ))
       id
     },
-    handler: fn(body, pipe_id, message) {
+    handler: fn(body, id, message) {
       // TODO: I guess we would switch on user-agent here..?
       case pipe.handle(pipe.Curl(body), message) {
         pipe.Dead -> {
-          process.send(master, pipemaster.CleanPipe(pipe_name, pipe_id))
+          process.send(master, pipemaster.CleanPipe(pipe_name, remove_id: id))
           ewe.chunked_stop()
         }
-        _ -> ewe.chunked_continue(pipe_id)
+        _ -> ewe.chunked_continue(id)
       }
     },
     on_close: fn(_conn, _state) {
@@ -72,10 +72,11 @@ fn send_to_pipe(req: Request, pipe_name: String, master: pipemaster.Subject) {
 }
 
 fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
-  logging.log(logging.Info, "what the??")
-
+  let method_str = http.method_to_string(req.method)
   let user_agent = request.get_header(req, "user-agent")
     |> result.unwrap("unknown")
+
+  logging.log(logging.Info, method_str <> " " <> req.path <> " (" <> user_agent <> ")")
 
   case request.path_segments(req) {
     [] -> 

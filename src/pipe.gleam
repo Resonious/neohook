@@ -1,3 +1,4 @@
+import gleam/list
 import gleam/result
 import gleam/bit_array
 import gleam/otp/actor
@@ -28,6 +29,11 @@ pub fn new(kind: Kind) {
   |> actor.start
 }
 
+fn ewe_send(body: ewe.ChunkedBody, contents: String) {
+  ewe.send_chunk(body, bit_array.from_string(contents))
+    |> result.try(fn(_) { Ok(body) })
+}
+
 pub fn handle(
   state: Kind,
   message: Message,
@@ -35,11 +41,27 @@ pub fn handle(
   case message {
     PushEntry(entry) -> case state {
       Curl(body) -> {
-        let res = ewe.send_chunk(body, entry.body)
-          |> result.try(fn(_) { ewe.send_chunk(body, bit_array.from_string("\n")) })
+        let print_headers = fn(_) {
+          list.try_each(
+            over: entry.headers,
+            with: fn(header) {
+            let #(name, value) = header
+            ewe_send(body, name)
+            |> result.try(ewe_send(_, ": "))
+            |> result.try(ewe_send(_, value))
+            |> result.try(ewe_send(_, "\n"))
+            }
+          )
+        }
+
+        let res = ewe_send(body, "\n")
+        |> result.try(print_headers)
+        |> result.try(fn(_) { ewe_send(body, "\n") })
+        |> result.try(ewe.send_chunk(_, entry.body))
+        |> result.try(fn(_) { ewe_send(body, "\n") })
 
         case res {
-          Ok(Nil) -> state
+          Ok(_) -> state
           Error(_) -> Dead
         }
       }
