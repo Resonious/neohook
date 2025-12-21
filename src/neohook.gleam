@@ -1,5 +1,4 @@
 import gleam/string
-import gleam/string_tree
 import pipemaster
 import pipe
 import gleam/http
