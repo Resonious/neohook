@@ -1,9 +1,12 @@
+import gleam/dynamic/decode
+import gleam/json
 import gleam/list
 import gleam/result
 import gleam/bit_array
 import gleam/otp/actor
 import ewe
 import gleam/http
+import json_pretty
 
 pub type Entry {
   Entry(
@@ -54,10 +57,17 @@ pub fn handle(
           )
         }
 
+        let string_to_send = json.parse_bits(entry.body, decode.dynamic)
+        |> result.map_error(fn(_e) { "failed to decode" })
+        |> result.try(json_pretty.from_dynamic)
+        |> result.map(json_pretty.pretty_print)
+        |> result.map(bit_array.from_string)
+        |> result.lazy_unwrap(fn() { entry.body })
+
         let res = ewe_send(body, "\n")
         |> result.try(print_headers)
         |> result.try(fn(_) { ewe_send(body, "\n") })
-        |> result.try(ewe.send_chunk(_, entry.body))
+        |> result.try(ewe.send_chunk(_, string_to_send))
         |> result.try(fn(_) { ewe_send(body, "\n") })
 
         case res {
