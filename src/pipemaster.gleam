@@ -26,7 +26,9 @@ type State = dict.Dict(
   dict.Dict(Int, process.Subject(pipe.Message)),
 )
 
-pub fn new() {
+pub type Pipemaster = actor.Started(process.Subject(Message))
+
+pub fn new() -> Result(Pipemaster, actor.StartError) {
   actor.new(dict.new())
   |> actor.on_message(handle_message)
   |> actor.start

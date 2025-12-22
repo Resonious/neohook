@@ -1,3 +1,6 @@
+import gleam/uri
+import env
+import tls
 import gleam/yielder
 import gleam/dict
 import gleam/string
@@ -5,7 +8,7 @@ import pipemaster
 import pipe
 import gleam/http
 import gleam/result
-import gleam/option.{None}
+import gleam/option.{None, Some}
 import gleam/erlang/process
 import gleam/http/request
 import logging
@@ -174,19 +177,56 @@ fn compute_pipe_name(parts: List(String)) -> String {
   string.join(parts, "/")
 }
 
-fn start_server() {
-  let assert Ok(master) = pipemaster.new()
-
+fn start_http_server(master: pipemaster.Pipemaster, bind bind: String, on port: Int) {
   mist.new(http_handler(_, master.data))
-    |> mist.port(8080)
+    |> mist.port(port)
+    |> mist.bind(bind)
+    |> mist.start
+}
+
+fn start_https_server(master: pipemaster.Pipemaster, with config: tls.Config) {
+  mist.new(http_handler(_, master.data))
+    |> mist.port(443)
+    |> mist.bind("0.0.0.0")
+    |> mist.with_tls(certfile: config.fullchain, keyfile: config.privkey)
     |> mist.start
 }
 
 pub fn main() {
   logging.configure()
   logging.set_level(logging.Info)
+  let assert Ok(master) = pipemaster.new()
 
-  let assert Ok(_) = start_server()
+  let assert Ok(app_url) = case env.get("HOOK_URL") {
+    Some(url) -> url
+    None -> "http://localhost:8080"
+  }
+  |> uri.parse
+
+  let _ = case app_url.scheme, app_url.host {
+    Some("https"), Some(host) -> {
+      let tls_config_path = "/etc/letsencrypt/renewal/" <> host <> ".conf"
+
+      let assert Ok(_) = start_https_server(
+        master,
+        with: tls.parse_config(at: tls_config_path),
+      )
+
+      let assert Ok(_) = start_http_server(
+        master,
+        bind: "0.0.0.0",
+        on: option.unwrap(app_url.port, 443),
+      )
+    }
+
+    _, host -> {
+      let assert Ok(_) = start_http_server(
+        master,
+        bind: option.unwrap(host,  "localhost"),
+        on: option.unwrap(app_url.port, 8080),
+      )
+    }
+  }
 
   process.sleep_forever()
 }
