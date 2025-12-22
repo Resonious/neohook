@@ -1,3 +1,5 @@
+import gleam/bytes_tree
+import gleam/erlang/process
 import gleam/function
 import gleam/dict
 import gleam/dynamic/decode
@@ -6,9 +8,10 @@ import gleam/list
 import gleam/result
 import gleam/bit_array
 import gleam/otp/actor
-import ewe
+import gleam/string_tree
 import gleam/http
 import json_pretty
+import mist
 
 pub type Entry {
   Entry(
@@ -23,8 +26,8 @@ pub type Message {
 }
 
 pub type Kind {
-  Curl(ewe.ChunkedBody)
-  Sse(ewe.SSEConnection)
+  Curl(process.Subject(bytes_tree.BytesTree))
+  Sse(mist.SSEConnection)
 
   Dead
 }
@@ -35,9 +38,15 @@ pub fn new(kind: Kind) {
   |> actor.start
 }
 
-fn ewe_send(body: ewe.ChunkedBody, contents: String) {
-  ewe.send_chunk(body, bit_array.from_string(contents))
-    |> result.try(fn(_) { Ok(body) })
+fn send_sse_data(conn: mist.SSEConnection, data: String) -> Result(Nil, Nil) {
+  mist.event(string_tree.from_string(data))
+  |> mist.send_event(conn, _)
+}
+
+fn send_sse_named_event(conn: mist.SSEConnection, name: String, data: String) -> Result(Nil, Nil) {
+  mist.event(string_tree.from_string(data))
+  |> mist.event_name(name)
+  |> mist.send_event(conn, _)
 }
 
 pub fn handle(
@@ -46,37 +55,36 @@ pub fn handle(
 ) -> Kind {
   case message {
     PushEntry(entry) -> case state {
-      Curl(body) -> {
-        let print_headers = fn(_) {
-          list.try_each(
-            over: entry.headers,
-            with: fn(header) {
-            let #(name, value) = header
-            ewe_send(body, name)
-            |> result.try(ewe_send(_, ": "))
-            |> result.try(ewe_send(_, value))
-            |> result.try(ewe_send(_, "\n"))
-            }
-          )
-        }
+      Curl(subject) -> {
+        let headers = list.map(
+          entry.headers,
+          fn(kv) {
+            let #(name, value) = kv
+            bytes_tree.from_string(name)
+            |> bytes_tree.append(bit_array.from_string(": "))
+            |> bytes_tree.append(bit_array.from_string(value))
+            |> bytes_tree.append(bit_array.from_string("\n"))
+          }
+        )
+        |> bytes_tree.concat
 
-        let string_to_send = json.parse_bits(entry.body, decode.dynamic)
-        |> result.map_error(fn(_e) { "failed to decode" })
-        |> result.try(json_pretty.from_dynamic)
-        |> result.map(json_pretty.pretty_print)
-        |> result.map(bit_array.from_string)
-        |> result.lazy_unwrap(fn() { entry.body })
+        let body = json.parse_bits(entry.body, decode.dynamic)
+          |> result.map_error(fn(_e) { "failed to decode" })
+          |> result.try(json_pretty.from_dynamic)
+          |> result.map(json_pretty.pretty_print)
+          |> result.map(bit_array.from_string)
+          |> result.unwrap(entry.body)
+          |> bytes_tree.from_bit_array
 
-        let res = ewe_send(body, "\n")
-        |> result.try(print_headers)
-        |> result.try(fn(_) { ewe_send(body, "\n") })
-        |> result.try(ewe.send_chunk(_, string_to_send))
-        |> result.try(fn(_) { ewe_send(body, "\n") })
+        let total = bytes_tree.from_string("\n")
+          |> bytes_tree.append_tree(headers)
+          |> bytes_tree.append_string("\n")
+          |> bytes_tree.append_tree(body)
+          |> bytes_tree.append_string("\n")
 
-        case res {
-          Ok(_) -> state
-          Error(_) -> Dead
-        }
+        process.send(subject, total)
+
+        state
       }
 
       Sse(conn) -> {
@@ -89,12 +97,8 @@ pub fn handle(
           |> json.dict(function.identity, json.string)
           |> json.to_string
 
-        let headers_event = ewe.event(headers_data) |> ewe.event_name("headers")
-        let body_event = ewe.event(body_data)
-
-        let res = ewe.send_event(conn, headers_event)
-          |> result.map(fn(_) { conn })
-          |> result.try(ewe.send_event(_, body_event))
+        let res = send_sse_named_event(conn, "headers", headers_data)
+          |> result.try(fn(_) { send_sse_data(conn, body_data) })
 
         case res {
           Ok(_) -> state

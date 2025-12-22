@@ -1,3 +1,4 @@
+import gleam/yielder
 import gleam/dict
 import gleam/string
 import pipemaster
@@ -9,74 +10,88 @@ import gleam/erlang/process
 import gleam/http/request
 import logging
 import gleam/http/response
+import gleam/bytes_tree
+import gleam/otp/actor
+import mist
 
-import ewe.{type Request, type Response}
+type Request = request.Request(mist.Connection)
+type Response = response.Response(mist.ResponseData)
+
+type SseState {
+  SseState(
+    id: Int,
+    pipe_name: String,
+    master: pipemaster.Subject,
+  )
+}
 
 fn listen_on_pipe_for_curl(
-  req: Request,
+  _req: Request,
   pipe_name: String,
   master: pipemaster.Subject,
-) {
-  ewe.chunked_body(
-    req,
-    response.new(200) |> response.set_header("content-type", "application/octet-stream"),
-    on_init: fn(subject) {
-      let id = pipemaster.new_pipe_id()
+) -> Response {
+  let receiver = process.new_subject()
+  let iter = yielder.repeatedly(fn() {
+    process.receive_forever(receiver)
+  })
+
+  let id = pipemaster.new_pipe_id()
+  case pipe.new(pipe.Curl(receiver)) {
+    Ok(actor) -> {
       process.send(master, pipemaster.AddPipe(
-        name: pipe_name,
-        id:,
-        subject:,
+        pipe_name,
+        id,
+        actor.data,
       ))
-      id
-    },
-    handler: fn(body, id, message) {
-      case pipe.handle(pipe.Curl(body), message) {
-        pipe.Dead -> {
-          process.send(master, pipemaster.CleanPipe(pipe_name, remove_id: id))
-          ewe.chunked_stop()
-        }
-        _ -> ewe.chunked_continue(id)
-      }
-    },
-    on_close: fn(_conn, id) {
-      process.send(master, pipemaster.CleanPipe(pipe_name, remove_id: id))
+
+      response.new(200)
+      |> response.set_body(mist.Chunked(iter))
+      |> response.set_header("content-type", "application/octet-stream")
     }
-  )
+
+    Error(err) -> {
+      echo err
+      response.new(500)
+      |> response.set_body(mist.Bytes(bytes_tree.from_string("uh oh")))
+    }
+  }
 }
 
 fn listen_on_pipe_for_sse(
   req: Request,
   pipe_name: String,
   master: pipemaster.Subject,
-) {
-  ewe.sse(
+) -> Response {
+  mist.server_sent_events(
     req,
-    on_init: fn(subject) {
+    response.new(200) |> response.set_header("content-type", "text/event-stream"),
+    init: fn(subject) {
       let id = pipemaster.new_pipe_id()
       process.send(master, pipemaster.AddPipe(
         name: pipe_name,
-        id:,
-        subject:,
+        id: id,
+        subject: subject,
       ))
-      id
+      let selector = process.new_selector()
+        |> process.select(subject)
+      actor.initialised(SseState(id, pipe_name, master))
+      |> actor.selecting(selector)
+      |> Ok
     },
-    handler: fn(conn, id, message) {
+    loop: fn(state, message, conn) {
       case pipe.handle(pipe.Sse(conn), message) {
         pipe.Dead -> {
-          process.send(master, pipemaster.CleanPipe(pipe_name, remove_id: id))
-          ewe.sse_stop()
+          process.send(state.master, pipemaster.CleanPipe(state.pipe_name, remove_id: state.id))
+          actor.stop()
         }
-        _ -> ewe.sse_continue(id)
+        _ -> actor.continue(state)
       }
-    },
-    on_close: fn(_conn, id) {
-      process.send(master, pipemaster.CleanPipe(pipe_name, remove_id: id))
     },
   )
 }
 
-fn send_to_pipe(req: Request, pipe_name: String, master: pipemaster.Subject) {
-  case ewe.read_body(req, bytes_limit: 1024 * 8) {
+fn send_to_pipe(req: Request, pipe_name: String, master: pipemaster.Subject) -> Response {
+  case mist.read_body(req, 1024 * 8) {
     Ok(req) -> {
       process.send(master, pipemaster.PushEntry(
         pipe_name,
@@ -89,21 +104,21 @@ fn send_to_pipe(req: Request, pipe_name: String, master: pipemaster.Subject) {
 
       response.new(200)
       |> response.set_header("content-type", "text/plain")
-      |> response.set_body(ewe.TextData("Sent"))
+      |> response.set_body(mist.Bytes(bytes_tree.from_string("Sent")))
     }
-    Error(ewe.BodyTooLarge) ->
+    Error(mist.ExcessBody) ->
       response.new(413)
       |> response.set_header("content-type", "text/plain; charset=utf-8")
-      |> response.set_body(ewe.TextData("Body too large"))
-    Error(ewe.InvalidBody) ->
+      |> response.set_body(mist.Bytes(bytes_tree.from_string("Body too large")))
+    Error(mist.MalformedBody) ->
       response.new(400)
       |> response.set_header("content-type", "text/plain; charset=utf-8")
-      |> response.set_body(ewe.TextData("Invalid request"))
+      |> response.set_body(mist.Bytes(bytes_tree.from_string("Invalid request")))
   }
 }
 
-fn serve_browser() {
-  let assert Ok(file) = ewe.file("static/view.html", offset: None, limit: None)
+fn serve_browser() -> Response {
+  let assert Ok(file) = mist.send_file("static/view.html", offset: 0, limit: None)
 
   response.new(200)
   |> response.set_header("content-type", "text/html; charset=utf-8")
@@ -128,10 +143,10 @@ fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
         http.Get, SseRequester -> listen_on_pipe_for_sse(req, pipe_name, master)
         http.Get, UnknownRequester -> serve_browser()
         http.Post, _ -> send_to_pipe(req, pipe_name, master)
-        _, _ -> 
+        _, _ ->
           response.new(405)
           |> response.set_header("content-type", "text/plain; charset=utf-8")
-          |> response.set_body(ewe.TextData("method not allowed"))
+          |> response.set_body(mist.Bytes(bytes_tree.from_string("method not allowed")))
       }
     }
   }
@@ -160,10 +175,9 @@ fn compute_pipe_name(parts: List(String)) -> String {
 fn start_server() {
   let assert Ok(master) = pipemaster.new()
 
-  ewe.new(http_handler(_, master.data))
-    |> ewe.bind_all()
-    |> ewe.listening(port: 8080)
-    |> ewe.start()
+  mist.new(http_handler(_, master.data))
+    |> mist.port(8080)
+    |> mist.start
 }
 
 pub fn main() {
