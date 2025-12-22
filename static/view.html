@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Gajraj+One&display=swap"
+            rel="stylesheet"
+        />
+
+        <style>
+            body {
+                font-family: sans-serif;
+            }
+
+            h1 {
+                font-family: "Gajraj One";
+            }
+
+            #received {
+                display: flex;
+                flex-direction: column;
+                align-items: start;
+            }
+
+            #received pre {
+                padding: 1em;
+                margin: 0;
+
+                border-radius: 8px;
+                opacity: 0;
+                transform: translateX(999px);
+            }
+
+            #received pre:nth-child(odd) {
+                margin-top: 2em;
+
+                border-bottom-left-radius: 0;
+                border-bottom-right-radius: 0;
+
+                border: 1px solid black;
+                border-bottom: none;
+
+                transition: transform 0.5s;
+            }
+
+            #received pre:nth-child(even) {
+                border-top-left-radius: 0;
+                border-top-right-radius: 0;
+
+                border: 1px solid black;
+
+                transition: opacity 0.5s;
+            }
+
+            .code {
+                font-family: monospace;
+            }
+
+            .highlight {
+                color: red;
+                font-weight: bold;
+            }
+
+            #protip {
+                margin-top: 2em;
+            }
+        </style>
+
+        <title>snd.one</title>
+    </head>
+
+    <body>
+        <h1>hook.snd.one</h1>
+
+        <div>
+            Try this:
+            <pre class="code" id="get"></pre>
+            <div class="code" id="post"></div>
+        </div>
+
+        <div id="protip">
+            <small
+                >P.S. the <span class="highlight" id="ident"></span> can be
+                anything.</small
+            >
+        </div>
+
+        <div id="received"></div>
+
+        <script>
+            const get = document.getElementById("get");
+            const post = document.getElementById("post");
+            const protip = document.getElementById("protip");
+
+            const url = new URL(location.href);
+
+            let suggestedId;
+            if (url.pathname === "/") {
+                suggestedId = crypto
+                    .getRandomValues(new Uint32Array(1))[0]
+                    .toString(16);
+                document.getElementById("ident").textContent = suggestedId;
+            } else {
+                protip.remove();
+            }
+
+            const appendSuggestedPath = (el) => {
+                if (suggestedId) {
+                    const path = document.createElement("span");
+                    path.textContent = suggestedId;
+                    path.classList.add("highlight");
+                    el.append(path);
+                }
+            };
+
+            get.textContent = `curl ${url}`;
+            appendSuggestedPath(get);
+            post.textContent = `curl -d 'Hello, world!' ${url}`;
+            appendSuggestedPath(post);
+            if (suggestedId) url.pathname = suggestedId;
+
+            {
+                const received = document.getElementById("received");
+                const evt = new EventSource(url);
+
+                const addReceived = (text) => {
+                    const el = document.createElement("pre");
+                    el.textContent = text;
+                    received.prepend(el);
+
+                    setTimeout(() => {
+                        el.style.transform = "translateX(0)";
+                        el.style.opacity = "1";
+                    }, 1);
+                };
+
+                evt.addEventListener("headers", (e) => {
+                    const headers = JSON.parse(e.data);
+                    let text = "";
+                    for (const name in headers) {
+                        text += name + ": " + headers[name] + "\n";
+                    }
+                    text += `${new Date().toLocaleString()}\n`;
+                    addReceived(text);
+                });
+
+                evt.addEventListener("message", (e) => {
+                    const message = e.data;
+                    addReceived(message);
+                });
+            }
+        </script>
+    </body>
+</html>

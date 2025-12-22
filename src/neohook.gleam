@@ -4,6 +4,7 @@ import pipemaster
 import pipe
 import gleam/http
 import gleam/result
+import gleam/option.{None}
 import gleam/erlang/process
 import gleam/http/request
 import logging
@@ -101,19 +102,23 @@ fn send_to_pipe(req: Request, pipe_name: String, master: pipemaster.Subject) {
   }
 }
 
+fn serve_browser() {
+  let assert Ok(file) = ewe.file("static/view.html", offset: None, limit: None)
+
+  response.new(200)
+  |> response.set_header("content-type", "text/html; charset=utf-8")
+  |> response.set_body(file)
+}
+
 fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
   let method_str = http.method_to_string(req.method)
   let user_agent = request.get_header(req, "user-agent")
     |> result.unwrap("unknown")
 
-  echo req.headers
   logging.log(logging.Info, method_str <> " " <> req.path <> " (" <> user_agent <> ")")
 
   case request.path_segments(req) {
-    [] -> 
-      response.new(200)
-      |> response.set_header("content-type", "text/plain; charset=utf-8")
-      |> response.set_body(ewe.TextData("Hello, World!"))
+    [] -> serve_browser()
 
     parts -> {
       let pipe_name = compute_pipe_name(parts)
@@ -121,6 +126,7 @@ fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
       case req.method, infer_requester_type(from_headers: req.headers) {
         http.Get, CurlRequester -> listen_on_pipe_for_curl(req, pipe_name, master)
         http.Get, SseRequester -> listen_on_pipe_for_sse(req, pipe_name, master)
+        http.Get, UnknownRequester -> serve_browser()
         http.Post, _ -> send_to_pipe(req, pipe_name, master)
         _, _ -> 
           response.new(405)
