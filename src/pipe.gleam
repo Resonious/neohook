@@ -1,3 +1,5 @@
+import gleam/function
+import gleam/dict
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
@@ -22,6 +24,7 @@ pub type Message {
 
 pub type Kind {
   Curl(ewe.ChunkedBody)
+  Sse(ewe.SSEConnection)
 
   Dead
 }
@@ -69,6 +72,29 @@ pub fn handle(
         |> result.try(fn(_) { ewe_send(body, "\n") })
         |> result.try(ewe.send_chunk(_, string_to_send))
         |> result.try(fn(_) { ewe_send(body, "\n") })
+
+        case res {
+          Ok(_) -> state
+          Error(_) -> Dead
+        }
+      }
+
+      Sse(conn) -> {
+        let body_data = case bit_array.to_string(entry.body) {
+          Ok(utf8) -> utf8
+          Error(_) -> bit_array.base64_encode(entry.body, False)
+        }
+
+        let headers_data = dict.from_list(entry.headers)
+          |> json.dict(function.identity, json.string)
+          |> json.to_string
+
+        let headers_event = ewe.event(headers_data) |> ewe.event_name("headers")
+        let body_event = ewe.event(body_data)
+
+        let res = ewe.send_event(conn, headers_event)
+          |> result.map(fn(_) { conn })
+          |> result.try(ewe.send_event(_, body_event))
 
         case res {
           Ok(_) -> state

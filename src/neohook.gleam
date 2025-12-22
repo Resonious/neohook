@@ -1,3 +1,4 @@
+import gleam/dict
 import gleam/string
 import pipemaster
 import pipe
@@ -10,7 +11,7 @@ import gleam/http/response
 
 import ewe.{type Request, type Response}
 
-fn listen_on_pipe(
+fn listen_on_pipe_for_curl(
   req: Request,
   pipe_name: String,
   master: pipemaster.Subject,
@@ -28,7 +29,6 @@ fn listen_on_pipe(
       id
     },
     handler: fn(body, id, message) {
-      // TODO: I guess we would switch on user-agent here..?
       case pipe.handle(pipe.Curl(body), message) {
         pipe.Dead -> {
           process.send(master, pipemaster.CleanPipe(pipe_name, remove_id: id))
@@ -37,9 +37,40 @@ fn listen_on_pipe(
         _ -> ewe.chunked_continue(id)
       }
     },
-    on_close: fn(_conn, _state) {
-      logging.log(logging.Info, "Bye bye??")
+    on_close: fn(_conn, id) {
+      process.send(master, pipemaster.CleanPipe(pipe_name, remove_id: id))
     }
+  )
+}
+
+fn listen_on_pipe_for_sse(
+  req: Request,
+  pipe_name: String,
+  master: pipemaster.Subject,
+) {
+  ewe.sse(
+    req,
+    on_init: fn(subject) {
+      let id = pipemaster.new_pipe_id()
+      process.send(master, pipemaster.AddPipe(
+        name: pipe_name,
+        id:,
+        subject:,
+      ))
+      id
+    },
+    handler: fn(conn, id, message) {
+      case pipe.handle(pipe.Sse(conn), message) {
+        pipe.Dead -> {
+          process.send(master, pipemaster.CleanPipe(pipe_name, remove_id: id))
+          ewe.sse_stop()
+        }
+        _ -> ewe.sse_continue(id)
+      }
+    },
+    on_close: fn(_conn, id) {
+      process.send(master, pipemaster.CleanPipe(pipe_name, remove_id: id))
+    },
   )
 }
 
@@ -75,6 +106,7 @@ fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
   let user_agent = request.get_header(req, "user-agent")
     |> result.unwrap("unknown")
 
+  echo req.headers
   logging.log(logging.Info, method_str <> " " <> req.path <> " (" <> user_agent <> ")")
 
   case request.path_segments(req) {
@@ -86,15 +118,32 @@ fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
     parts -> {
       let pipe_name = compute_pipe_name(parts)
 
-      case req.method {
-        http.Get -> listen_on_pipe(req, pipe_name, master)
-        http.Post -> send_to_pipe(req, pipe_name, master)
-        _ -> 
+      case req.method, infer_requester_type(from_headers: req.headers) {
+        http.Get, CurlRequester -> listen_on_pipe_for_curl(req, pipe_name, master)
+        http.Get, SseRequester -> listen_on_pipe_for_sse(req, pipe_name, master)
+        http.Post, _ -> send_to_pipe(req, pipe_name, master)
+        _, _ -> 
           response.new(405)
           |> response.set_header("content-type", "text/plain; charset=utf-8")
           |> response.set_body(ewe.TextData("method not allowed"))
       }
     }
+  }
+}
+
+type RequesterType {
+  CurlRequester
+  SseRequester
+  UnknownRequester
+}
+
+fn infer_requester_type(from_headers headers: List(#(String, String))) -> RequesterType {
+  let h = dict.from_list(headers)
+
+  case dict.get(h, "accept"), dict.get(h, "user-agent") {
+    Ok("text/event-stream"), _  -> SseRequester
+    _, Ok("curl/" <> _)         -> CurlRequester
+    _, _                        -> UnknownRequester
   }
 }
 
