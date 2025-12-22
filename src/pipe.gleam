@@ -1,3 +1,4 @@
+import gleam/bool.{guard}
 import gleam/bytes_tree
 import gleam/erlang/process
 import gleam/function
@@ -26,7 +27,7 @@ pub type Message {
 }
 
 pub type Kind {
-  Curl(process.Subject(bytes_tree.BytesTree))
+  Curl(process.Subject(bytes_tree.BytesTree), process.Pid)
   Sse(mist.SSEConnection)
 
   Dead
@@ -55,7 +56,9 @@ pub fn handle(
 ) -> Kind {
   case message {
     PushEntry(entry) -> case state {
-      Curl(subject) -> {
+      Curl(subject, pid) -> {
+        use <- guard(when: !process.is_alive(pid), return: Dead)
+
         let headers = list.map(
           entry.headers,
           fn(kv) {

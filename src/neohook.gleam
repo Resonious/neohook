@@ -31,12 +31,14 @@ fn listen_on_pipe_for_curl(
   master: pipemaster.Subject,
 ) -> Response {
   let receiver = process.new_subject()
+  let pid = process.self()
+
   let iter = yielder.repeatedly(fn() {
     process.receive_forever(receiver)
   })
 
   let id = pipemaster.new_pipe_id()
-  case pipe.new(pipe.Curl(receiver)) {
+  case pipe.new(pipe.Curl(receiver, pid)) {
     Ok(actor) -> {
       process.send(master, pipemaster.AddPipe(
         pipe_name,
