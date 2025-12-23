@@ -215,7 +215,7 @@ pub fn main() {
       let assert Ok(_) = start_http_server(
         master,
         bind: "0.0.0.0",
-        on: option.unwrap(app_url.port, 443),
+        on: option.unwrap(app_url.port, 80),
       )
     }
 
