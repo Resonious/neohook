@@ -11,15 +11,11 @@ pub fn get(name: String) -> Option(String) {
   let as_bool = decode.run(var, decode.bool)
   use <- guard(when: result.is_ok(as_bool), return: None)
 
-  let as_charlist = decode.run(var, decode.list(of: decode.int))
-  use <- guard(when: result.is_error(as_bool), return: None)
-  let assert Ok(value) = as_charlist
-
-  Some(characters_to_binary(value))
+  Some(characters_to_binary(var))
 }
 
 @external(erlang, "os", "getenv")
 fn getenv(env: charlist.Charlist) -> dynamic.Dynamic
 
 @external(erlang, "unicode", "characters_to_binary")
-fn characters_to_binary(chars: List(Int)) -> String
+fn characters_to_binary(chars: dynamic.Dynamic) -> String
