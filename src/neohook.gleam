@@ -1,3 +1,4 @@
+import termcolor
 import gleam/uri
 import env
 import tls
@@ -29,16 +30,35 @@ type SseState {
 }
 
 fn listen_on_pipe_for_curl(
-  _req: Request,
+  req: Request,
   pipe_name: String,
   master: pipemaster.Subject,
 ) -> Response {
   let receiver = process.new_subject()
   let pid = process.self()
 
-  let iter = yielder.repeatedly(fn() {
-    process.receive_forever(receiver)
+  let url = req |> request.to_uri |> uri.to_string
+
+  let iter = yielder.once(fn() {
+    bytes_tree.new()
+    |> bytes_tree.append_string("You are listening on ")
+    |> bytes_tree.append_string(termcolor.red)
+    |> bytes_tree.append_string("/")
+    |> bytes_tree.append_string(pipe_name)
+    |> bytes_tree.append_string(termcolor.reset)
+    |> bytes_tree.append_string("\n\n")
+    |> bytes_tree.append_string("Try this in another terminal: ")
+    |> bytes_tree.append_string(termcolor.cyan)
+    |> bytes_tree.append_string("\n  curl -d 'Hello, World!' ")
+    |> bytes_tree.append_string(url)
+    |> bytes_tree.append_string(termcolor.reset)
+    |> bytes_tree.append_string("\n\n")
   })
+  |> yielder.append(
+    yielder.repeatedly(fn() {
+      process.receive_forever(receiver)
+    })
+  )
 
   let id = pipemaster.new_pipe_id()
   case pipe.new(pipe.Curl(receiver, pid)) {

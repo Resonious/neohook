@@ -1,3 +1,4 @@
+import termcolor
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/dict.{type Dict}
@@ -73,13 +74,13 @@ pub fn from_dynamic(d: Dynamic) -> Result(JsonValue, String) {
 }
 
 // ANSI color codes
-const color_reset = "\u{001b}[0m"
-const color_string = "\u{001b}[32m"      // Green
-const color_number = "\u{001b}[33m"      // Yellow
-const color_bool = "\u{001b}[35m"        // Magenta
-const color_null = "\u{001b}[90m"        // Gray
-const color_key = "\u{001b}[36m"         // Cyan
-const color_bracket = "\u{001b}[37m"     // White
+const color_reset = termcolor.reset
+const color_string = termcolor.green
+const color_number = termcolor.yellow
+const color_bool = termcolor.magenta
+const color_null = termcolor.gray
+const color_key = termcolor.cyan
+const color_bracket = termcolor.white
 
 fn make_indent(level: Int) -> String {
   string.repeat("  ", level)
