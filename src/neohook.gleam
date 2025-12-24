@@ -236,6 +236,30 @@ fn start_http_server(master: pipemaster.Pipemaster, bind bind: String, on port: 
     |> mist.start
 }
 
+fn start_redirecting_to_https() {
+  let handler = fn(req) {
+    let u = request.to_uri(req)
+    let https_uri = uri.Uri(
+      scheme: Some("https"),
+      userinfo: u.userinfo,
+      host: u.host,
+      port: None,
+      path: u.path,
+      query: u.query,
+      fragment: u.fragment,
+    )
+
+    response.new(301)
+    |> response.set_header("location", uri.to_string(https_uri))
+    |> response.set_body(mist.Bytes(bytes_tree.from_string("redirecting to https")))
+  }
+
+  mist.new(handler)
+    |> mist.port(80)
+    |> mist.bind("0.0.0.0")
+    |> mist.start
+}
+
 fn start_https_server(master: pipemaster.Pipemaster, with config: tls.Config) {
   mist.new(http_handler(_, master.data))
     |> mist.port(443)
@@ -264,11 +288,7 @@ pub fn main() {
         with: tls.parse_config(at: tls_config_path),
       )
 
-      let assert Ok(_) = start_http_server(
-        master,
-        bind: "0.0.0.0",
-        on: option.unwrap(app_url.port, 80),
-      )
+      let assert Ok(_) = start_redirecting_to_https()
     }
 
     _, host -> {
