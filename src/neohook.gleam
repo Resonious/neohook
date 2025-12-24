@@ -1,3 +1,4 @@
+import gleam/int
 import termcolor
 import gleam/uri
 import env
@@ -29,6 +30,37 @@ type SseState {
   )
 }
 
+/// Same as uri.to_string but doesn't include the port when it's the
+/// default for the protocol (80, 443).
+pub fn better_uri_to_string(uri: uri.Uri) -> String {
+  let parts = case uri.fragment {
+    Some(fragment) -> ["#", fragment]
+    None -> []
+  }
+  let parts = case uri.query {
+    Some(query) -> ["?", query, ..parts]
+    None -> parts
+  }
+  let parts = [uri.path, ..parts]
+  let parts = case uri.host, string.starts_with(uri.path, "/") {
+    Some(host), False if host != "" -> ["/", ..parts]
+    _, _ -> parts
+  }
+  let parts = case uri.host, uri.port {
+    _, Some(80) | _, Some(443) -> parts
+    Some(_), Some(port) -> [":", int.to_string(port), ..parts]
+    _, _ -> parts
+  }
+  let parts = case uri.scheme, uri.userinfo, uri.host {
+    Some(s), Some(u), Some(h) -> [s, "://", u, "@", h, ..parts]
+    Some(s), None, Some(h) -> [s, "://", h, ..parts]
+    Some(s), Some(_), None | Some(s), None, None -> [s, ":", ..parts]
+    None, None, Some(h) -> ["//", h, ..parts]
+    _, _, _ -> parts
+  }
+  string.concat(parts)
+}
+
 fn listen_on_pipe_for_curl(
   req: Request,
   pipe_name: String,
@@ -37,7 +69,7 @@ fn listen_on_pipe_for_curl(
   let receiver = process.new_subject()
   let pid = process.self()
 
-  let url = req |> request.to_uri |> uri.to_string
+  let url = req |> request.to_uri |> better_uri_to_string
 
   let iter = yielder.once(fn() {
     bytes_tree.new()
