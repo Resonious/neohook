@@ -1,3 +1,4 @@
+import termcolor
 import gleam/bool.{guard}
 import gleam/bytes_tree
 import gleam/erlang/process
@@ -63,9 +64,14 @@ pub fn handle(
           entry.headers,
           fn(kv) {
             let #(name, value) = kv
-            bytes_tree.from_string(name)
+            bytes_tree.new()
+            |> bytes_tree.append(bit_array.from_string(termcolor.green))
+            |> bytes_tree.append(bit_array.from_string(name))
+            |> bytes_tree.append(bit_array.from_string(termcolor.reset))
             |> bytes_tree.append(bit_array.from_string(": "))
+            |> bytes_tree.append(bit_array.from_string(termcolor.yellow))
             |> bytes_tree.append(bit_array.from_string(value))
+            |> bytes_tree.append(bit_array.from_string(termcolor.reset))
             |> bytes_tree.append(bit_array.from_string("\n"))
           }
         )

@@ -32,7 +32,8 @@ type SseState {
 
 /// Same as uri.to_string but doesn't include the port when it's the
 /// default for the protocol (80, 443).
-pub fn better_uri_to_string(uri: uri.Uri) -> String {
+/// (also has termcolors)
+pub fn colorize_uri(uri: uri.Uri) -> String {
   let parts = case uri.fragment {
     Some(fragment) -> ["#", fragment]
     None -> []
@@ -41,7 +42,7 @@ pub fn better_uri_to_string(uri: uri.Uri) -> String {
     Some(query) -> ["?", query, ..parts]
     None -> parts
   }
-  let parts = [uri.path, ..parts]
+  let parts = [termcolor.red, uri.path, termcolor.reset, ..parts]
   let parts = case uri.host, string.starts_with(uri.path, "/") {
     Some(host), False if host != "" -> ["/", ..parts]
     _, _ -> parts
@@ -69,7 +70,7 @@ fn listen_on_pipe_for_curl(
   let receiver = process.new_subject()
   let pid = process.self()
 
-  let url = req |> request.to_uri |> better_uri_to_string
+  let colorized_url = req |> request.to_uri |> colorize_uri
 
   let iter = yielder.once(fn() {
     bytes_tree.new()
@@ -80,9 +81,13 @@ fn listen_on_pipe_for_curl(
     |> bytes_tree.append_string(termcolor.reset)
     |> bytes_tree.append_string("\n\n")
     |> bytes_tree.append_string("Try this in another terminal: ")
+    |> bytes_tree.append_string("\n  curl ")
     |> bytes_tree.append_string(termcolor.cyan)
-    |> bytes_tree.append_string("\n  curl -d 'Hello, World!' ")
-    |> bytes_tree.append_string(url)
+    |> bytes_tree.append_string("-d ")
+    |> bytes_tree.append_string(termcolor.yellow)
+    |> bytes_tree.append_string("'Hello, World!' ")
+    |> bytes_tree.append_string(termcolor.cyan)
+    |> bytes_tree.append_string(colorized_url)
     |> bytes_tree.append_string(termcolor.reset)
     |> bytes_tree.append_string("\n\n")
   })
