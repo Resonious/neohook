@@ -22,6 +22,6 @@ rsync -avz ./static/ "$TARGET:/var/www/neohook/static/"
 echo "Setting ownership to web:web..."
 ssh "$TARGET" "sudo chown -R web:web /var/www/neohook"
 
-ssh "$TARGET" "ssh hook systemctl restart hook"
+ssh "$TARGET" "systemctl restart hook"
 
 echo "Deploy complete!"
