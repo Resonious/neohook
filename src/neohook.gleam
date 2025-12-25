@@ -1,3 +1,5 @@
+import gleam/order
+import gleam/bool.{lazy_guard}
 import gleam/int
 import termcolor
 import gleam/uri
@@ -195,12 +197,28 @@ fn serve_static(path: String, content_type: String) {
   |> response.set_body(file)
 }
 
+fn remove_repeat_slashes(from str: String) -> String {
+  let scrubbed = string.replace(str, "//", "/")
+  case string.compare(str, scrubbed) {
+    order.Eq -> str
+    _ -> remove_repeat_slashes(from: scrubbed)
+  }
+}
+
 fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
   let method_str = http.method_to_string(req.method)
   let user_agent = request.get_header(req, "user-agent")
     |> result.unwrap("unknown")
 
   logging.log(logging.Info, method_str <> " " <> req.path <> " (" <> user_agent <> ")")
+
+  // Remove repeated slashes from paths
+  let scrubbed_path = remove_repeat_slashes(from: req.path)
+  use <- lazy_guard(when: req.path != scrubbed_path, return: fn() {
+    response.new(301)
+    |> response.set_header("location", scrubbed_path)
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
+  })
 
   case request.path_segments(req) {
     [] -> serve_html("static/landing.html")
