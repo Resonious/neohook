@@ -106,6 +106,7 @@
       svg.logo {
         height: fit-content;
         width: 70vw;
+        max-width: 600px;
       }
 
       svg.logo path {
@@ -298,11 +299,10 @@
           let headers;
           evt.addEventListener("headers", (e) => {
             const values = JSON.parse(e.data);
-            let text = "";
+            let text = `${new Date().toLocaleString()}\n`;
             for (const name in values) {
               text += name + ": " + values[name] + "\n";
             }
-            text += `${new Date().toLocaleString()}\n`;
             headers = text;
           });
 

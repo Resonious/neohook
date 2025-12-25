@@ -220,11 +220,10 @@
 
         evt.addEventListener("headers", (e) => {
           const headers = JSON.parse(e.data);
-          let text = "";
+          let text = `${new Date().toLocaleString()}\n`;
           for (const name in headers) {
             text += name + ": " + headers[name] + "\n";
           }
-          text += `${new Date().toLocaleString()}\n`;
           addReceived(text);
         });
 
