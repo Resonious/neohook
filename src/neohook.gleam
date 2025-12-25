@@ -153,7 +153,7 @@ fn listen_on_pipe_for_sse(
 }
 
 fn send_to_pipe(req: Request, pipe_name: String, master: pipemaster.Subject) -> Response {
-  case mist.read_body(req, 1024 * 8) {
+  case mist.read_body(req, 1024 * 100 * 50) {
     Ok(req) -> {
       process.send(master, pipemaster.PushEntry(
         pipe_name,
@@ -179,11 +179,19 @@ fn send_to_pipe(req: Request, pipe_name: String, master: pipemaster.Subject) -> 
   }
 }
 
-fn serve_browser() -> Response {
-  let assert Ok(file) = mist.send_file("static/view.html", offset: 0, limit: None)
+fn serve_html(path: String) -> Response {
+  let assert Ok(file) = mist.send_file(path, offset: 0, limit: None)
 
   response.new(200)
   |> response.set_header("content-type", "text/html; charset=utf-8")
+  |> response.set_body(file)
+}
+
+fn serve_static(path: String, content_type: String) {
+  let assert Ok(file) = mist.send_file(path, offset: 0, limit: None)
+
+  response.new(200)
+  |> response.set_header("content-type", content_type)
   |> response.set_body(file)
 }
 
@@ -195,7 +203,9 @@ fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
   logging.log(logging.Info, method_str <> " " <> req.path <> " (" <> user_agent <> ")")
 
   case request.path_segments(req) {
-    [] -> serve_browser()
+    [] -> serve_html("static/landing.html")
+    ["favicon.png"] -> serve_static("static/favicon.png", "image/png")
+    ["favicon.svg"] -> serve_static("static/favicon.svg", "image/svg+xml")
 
     parts -> {
       let pipe_name = compute_pipe_name(parts)
@@ -203,7 +213,7 @@ fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
       case req.method, infer_requester_type(from_headers: req.headers) {
         http.Get, CurlRequester -> listen_on_pipe_for_curl(req, pipe_name, master)
         http.Get, SseRequester -> listen_on_pipe_for_sse(req, pipe_name, master)
-        http.Get, UnknownRequester -> serve_browser()
+        http.Get, UnknownRequester -> serve_html("static/view.html")
         http.Post, _ -> send_to_pipe(req, pipe_name, master)
         _, _ ->
           response.new(405)
