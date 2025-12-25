@@ -205,6 +205,15 @@ fn remove_repeat_slashes(from str: String) -> String {
   }
 }
 
+/// Returns a function so that it can be used nicely with lazy_guard
+fn redirect(to location: String) {
+  fn() {
+    response.new(301)
+    |> response.set_header("location", location)
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
+  }
+}
+
 fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
   let method_str = http.method_to_string(req.method)
   let user_agent = request.get_header(req, "user-agent")
@@ -212,14 +221,14 @@ fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
 
   logging.log(logging.Info, method_str <> " " <> req.path <> " (" <> user_agent <> ")")
 
+  // It seems the "//" path results in an empty string path
+  use <- lazy_guard(when: req.path == "", return: redirect(to: "/"))
+
   // Remove repeated slashes from paths
   let scrubbed_path = remove_repeat_slashes(from: req.path)
-  use <- lazy_guard(when: req.path != scrubbed_path, return: fn() {
-    response.new(301)
-    |> response.set_header("location", scrubbed_path)
-    |> response.set_body(mist.Bytes(bytes_tree.new()))
-  })
+  use <- lazy_guard(when: req.path != scrubbed_path, return: redirect(to: scrubbed_path))
 
+  // routing
   case request.path_segments(req) {
     [] -> serve_html("static/landing.html")
     ["favicon.png"] -> serve_static("static/favicon.png", "image/png")
