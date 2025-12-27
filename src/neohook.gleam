@@ -302,10 +302,14 @@ fn start_redirecting_to_https() {
     |> mist.start
 }
 
-fn start_https_server(master: pipemaster.Pipemaster, with config: tls.Config) {
+fn start_https_server(
+  master: pipemaster.Pipemaster,
+  on interface: String,
+  with config: tls.Config,
+) {
   mist.new(http_handler(_, master.data))
     |> mist.port(443)
-    |> mist.bind("0.0.0.0")
+    |> mist.bind(interface)
     |> mist.with_tls(certfile: config.fullchain, keyfile: config.privkey)
     |> mist.start
 }
@@ -327,6 +331,7 @@ pub fn main() {
 
       let assert Ok(_) = start_https_server(
         master,
+        on: "::",
         with: tls.parse_config(at: tls_config_path),
       )
 
