@@ -171,7 +171,7 @@ fn send_to_pipe(req: Request, pipe_name: String, master: pipemaster.Subject) -> 
 
       response.new(200)
       |> response.set_header("content-type", "text/plain")
-      |> response.set_body(mist.Bytes(bytes_tree.from_string("Sent")))
+      |> response.set_body(mist.Bytes(bytes_tree.from_string("Sent\n")))
     }
     Error(mist.ExcessBody) ->
       response.new(413)
@@ -184,10 +184,10 @@ fn send_to_pipe(req: Request, pipe_name: String, master: pipemaster.Subject) -> 
   }
 }
 
-fn serve_html(path: String) -> Response {
+fn serve_html(path: String, status status: Int) -> Response {
   let assert Ok(file) = mist.send_file(path, offset: 0, limit: None)
 
-  response.new(200)
+  response.new(status)
   |> response.set_header("content-type", "text/html; charset=utf-8")
   |> response.set_body(file)
 }
@@ -246,26 +246,41 @@ pub fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
 
   // routing
   case request.path_segments(req) {
-    [] -> serve_html("static/landing.html")
+    [] -> serve_html("static/landing.html", status: 200)
     ["favicon.png"] -> serve_static("static/favicon.png", "image/png")
     ["favicon.svg"] -> serve_static("static/favicon.svg", "image/svg+xml")
 
-    // TODO: do not allow "." in any of these parts..!
     parts -> {
       let pipe_name = compute_pipe_name(parts)
 
-      case req.method, infer_requester_type(from_headers: req.headers) {
-        http.Get, CurlRequester -> listen_on_pipe_for_curl(req, pipe_name, master)
-        http.Get, SseRequester -> listen_on_pipe_for_sse(req, pipe_name, master)
-        http.Get, UnknownRequester -> serve_html("static/view.html")
-        http.Post, _ -> send_to_pipe(req, pipe_name, master)
-        _, _ ->
+      case req.method, infer_requester_type(from_headers: req.headers), pipe_name {
+        http.Get, CurlRequester, Some(pipe_name) -> listen_on_pipe_for_curl(req, pipe_name, master)
+        http.Get, SseRequester, Some(pipe_name) -> listen_on_pipe_for_sse(req, pipe_name, master)
+        http.Get, UnknownRequester, Some(_) -> serve_html("static/view.html", status: 200)
+        http.Post, _, Some(pipe_name) -> send_to_pipe(req, pipe_name, master)
+        _, _, Some(_) ->
           response.new(405)
           |> response.set_header("content-type", "text/plain; charset=utf-8")
           |> response.set_body(mist.Bytes(bytes_tree.from_string("method not allowed")))
+
+        _, UnknownRequester, None -> serve_html("static/404.html", status: 404)
+        _, SseRequester, None -> serve_html("static/404.html", status: 404)
+        _, CurlRequester, None -> serve_curl_404()
       }
     }
   }
+}
+
+fn serve_curl_404() {
+  let body = bytes_tree.new()
+    |> bytes_tree.append_string(termcolor.red)
+    |> bytes_tree.append_string("404 NOT FOUND\n")
+    |> bytes_tree.append_string(termcolor.reset)
+    |> bytes_tree.append_string("\n")
+    |> bytes_tree.append_string("This path isn't a valid pipe.\n")
+
+  response.new(404)
+  |> response.set_body(mist.Bytes(body))
 }
 
 type RequesterType {
@@ -284,8 +299,15 @@ fn infer_requester_type(from_headers headers: List(#(String, String))) -> Reques
   }
 }
 
-fn compute_pipe_name(parts: List(String)) -> String {
-  string.join(parts, "/")
+/// Returns None if the pipe name is considered invalid
+fn compute_pipe_name(parts: List(String)) -> option.Option(String) {
+  let is_invalid = string.contains(_, ".")
+  let return = string.join(parts, "/")
+
+  case is_invalid(return) {
+    True -> option.None
+    False -> option.Some(return)
+  }
 }
 
 fn start_http_server(master: pipemaster.Pipemaster, bind bind: String, on port: Int) {
