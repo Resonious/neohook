@@ -22,3 +22,16 @@ Further documentation can be found at <https://hexdocs.pm/neohook>.
 gleam run   # Run the project
 gleam test  # Run the tests
 ```
+
+## Deployment
+
+Rough notes for now.
+
+Certbot:
+
+```bash
+DOMAIN=snd.one
+EMAIL=your-email@whatever.com
+
+certbot certonly --webroot --webroot-path /var/www/public -d $DOMAIN --non-interactive --agree-tos --email $EMAIL
+```

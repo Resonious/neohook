@@ -1,5 +1,6 @@
 import gleam/list
 import gleam/bit_array
+import gleam/result
 import gleam/string
 import gleam/erlang/charlist
 import gleam/option.{None, Some, type Option}
@@ -8,15 +9,25 @@ pub type Config {
   Config(privkey: String, fullchain: String)
 }
 
+pub type ConfigError {
+  ConfigReadError
+  ConfigNotUtf8
+  ConfigMissingFields
+}
+
 type PartialConfig {
   PartialConfig(privkey: Option(String), fullchain: Option(String))
 }
 
-pub fn parse_config(at path: String) -> Config {
+pub fn parse_config(at path: String) -> Result(Config, ConfigError) {
   let path = charlist.from_string(path)
 
-  let assert Ok(contents) = read_file(path)
-  let assert Ok(contents) = bit_array.to_string(contents)
+  use contents <- result.try(
+    read_file(path) |> result.replace_error(ConfigReadError),
+  )
+  use contents <- result.try(
+    bit_array.to_string(contents) |> result.replace_error(ConfigNotUtf8),
+  )
 
   let lines = string.split(contents, on: "\n")
 
@@ -42,10 +53,10 @@ pub fn parse_config(at path: String) -> Config {
 
   case config {
     PartialConfig(privkey: Some(privkey), fullchain: Some(fullchain)) -> {
-      Config(privkey:, fullchain:)
+      Ok(Config(privkey:, fullchain:))
     }
 
-    _ -> panic as "config file did not have privkey and fullchain"
+    _ -> Error(ConfigMissingFields)
   }
 }
 

@@ -278,22 +278,36 @@ fn start_http_server(master: pipemaster.Pipemaster, bind bind: String, on port: 
     |> mist.start
 }
 
+/// This includes serving from /var/www/public/.well-known/acme-challenge
 fn start_redirecting_to_https() {
   let handler = fn(req) {
-    let u = request.to_uri(req)
-    let https_uri = uri.Uri(
-      scheme: Some("https"),
-      userinfo: u.userinfo,
-      host: u.host,
-      port: None,
-      path: u.path,
-      query: u.query,
-      fragment: u.fragment,
-    )
+    case request.path_segments(req) {
+      [".well-known", "acme-challenge", challenge_file] -> {
+        let path = "/var/www/public/.well-known/acme-challenge/" <> challenge_file
+        logging.log(logging.Info, "Attempting to serve " <> challenge_file <> " at " <> path)
+        case mist.send_file(path, offset: 0, limit: None) {
+          Ok(file) -> response.new(200) |> response.set_body(file)
+          Error(_) -> response.new(404) |> response.set_body(mist.Bytes(bytes_tree.from_string("not found")))
+        }
+      }
 
-    response.new(301)
-    |> response.set_header("location", uri.to_string(https_uri))
-    |> response.set_body(mist.Bytes(bytes_tree.from_string("redirecting to https")))
+      _ -> {
+        let u = request.to_uri(req)
+        let https_uri = uri.Uri(
+          scheme: Some("https"),
+          userinfo: u.userinfo,
+          host: u.host,
+          port: None,
+          path: u.path,
+          query: u.query,
+          fragment: u.fragment,
+        )
+
+        response.new(301)
+        |> response.set_header("location", uri.to_string(https_uri))
+        |> response.set_body(mist.Bytes(bytes_tree.from_string("redirecting to https")))
+      }
+    }
   }
 
   mist.new(handler)
@@ -329,11 +343,17 @@ pub fn main() {
     Some("https"), Some(host) -> {
       let tls_config_path = "/etc/letsencrypt/renewal/" <> host <> ".conf"
 
-      let assert Ok(_) = start_https_server(
-        master,
-        on: "::",
-        with: tls.parse_config(at: tls_config_path),
-      )
+      let https_start = tls.parse_config(at: tls_config_path)
+      |> result.map(start_https_server(master, on: "::", with: _))
+
+      case https_start {
+        Ok(Ok(_)) -> Nil
+        Ok(Error(failed_to_start)) -> {
+          echo failed_to_start
+          panic as "failed to start https server"
+        }
+        Error(config_failed) -> logging.log(logging.Error, "Bad tls config: " <> string.inspect(config_failed))
+      }
 
       let assert Ok(_) = start_redirecting_to_https()
     }
