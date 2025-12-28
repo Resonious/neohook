@@ -21,6 +21,9 @@ import gleam/bytes_tree
 import gleam/otp/actor
 import mist
 
+@external(erlang, "hot", "call_handler")
+fn call_handler(req: Request, master: pipemaster.Subject) -> Response
+
 type Request = request.Request(mist.Connection)
 type Response = response.Response(mist.ResponseData)
 
@@ -214,12 +217,25 @@ fn redirect(to location: String) {
   }
 }
 
-fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
+fn log_request(req: Request, return: fn() -> Response) -> Response {
   let method_str = http.method_to_string(req.method)
   let user_agent = request.get_header(req, "user-agent")
     |> result.unwrap("unknown")
 
-  logging.log(logging.Info, method_str <> " " <> req.path <> " (" <> user_agent <> ")")
+  let resp = return()
+  let resp_status = resp.status |> int.to_string
+
+  logging.log(
+    logging.Info,
+    method_str <> " " <> req.path <> " -> " <> resp_status
+    <> " (" <> user_agent <> ")"
+  )
+
+  resp
+}
+
+pub fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
+  use <- log_request(req)
 
   // It seems the "//" path results in an empty string path
   use <- lazy_guard(when: req.path == "", return: redirect(to: "/"))
@@ -272,7 +288,7 @@ fn compute_pipe_name(parts: List(String)) -> String {
 }
 
 fn start_http_server(master: pipemaster.Pipemaster, bind bind: String, on port: Int) {
-  mist.new(http_handler(_, master.data))
+  mist.new(call_handler(_, master.data))
     |> mist.port(port)
     |> mist.bind(bind)
     |> mist.start
@@ -321,7 +337,7 @@ fn start_https_server(
   on interface: String,
   with config: tls.Config,
 ) {
-  mist.new(http_handler(_, master.data))
+  mist.new(call_handler(_, master.data))
     |> mist.port(443)
     |> mist.bind(interface)
     |> mist.with_tls(certfile: config.fullchain, keyfile: config.privkey)
