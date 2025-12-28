@@ -25,7 +25,7 @@ reload() {
     -eval "
       case net_kernel:connect_node('$NODE') of
         true ->
-          Modules = [hot, neohook, pipe, pipemaster, env, tls, json_pretty, termcolor],
+          Modules = [neohook, pipe, pipemaster, env, tls, json_pretty, termcolor],
           Results = [begin
             PurgeResult = rpc:call('$NODE', code, purge, [M]),
             LoadResult = rpc:call('$NODE', code, load_file, [M]),

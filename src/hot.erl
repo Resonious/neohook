@@ -1,5 +1,5 @@
 -module(hot).
--export([call_handler/2]).
+-export([make_handler/1]).
 
-call_handler(Req, Master) ->
-    neohook:http_handler(Req, Master).
+make_handler(Master) ->
+    fun(Req) -> neohook:http_handler(Req, Master) end.

@@ -21,8 +21,8 @@ import gleam/bytes_tree
 import gleam/otp/actor
 import mist
 
-@external(erlang, "hot", "call_handler")
-fn call_handler(req: Request, master: pipemaster.Subject) -> Response
+@external(erlang, "hot", "make_handler")
+fn make_handler(master: pipemaster.Subject) -> fn(Request) -> Response
 
 type Request = request.Request(mist.Connection)
 type Response = response.Response(mist.ResponseData)
@@ -250,6 +250,7 @@ pub fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
     ["favicon.png"] -> serve_static("static/favicon.png", "image/png")
     ["favicon.svg"] -> serve_static("static/favicon.svg", "image/svg+xml")
 
+    // TODO: do not allow "." in any of these parts..!
     parts -> {
       let pipe_name = compute_pipe_name(parts)
 
@@ -288,7 +289,7 @@ fn compute_pipe_name(parts: List(String)) -> String {
 }
 
 fn start_http_server(master: pipemaster.Pipemaster, bind bind: String, on port: Int) {
-  mist.new(call_handler(_, master.data))
+  mist.new(make_handler(master.data))
     |> mist.port(port)
     |> mist.bind(bind)
     |> mist.start
@@ -337,7 +338,7 @@ fn start_https_server(
   on interface: String,
   with config: tls.Config,
 ) {
-  mist.new(call_handler(_, master.data))
+  mist.new(make_handler(master.data))
     |> mist.port(443)
     |> mist.bind(interface)
     |> mist.with_tls(certfile: config.fullchain, keyfile: config.privkey)
