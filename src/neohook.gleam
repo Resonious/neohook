@@ -1,3 +1,5 @@
+import gleam/dynamic
+import gleam/list
 import gleam/order
 import gleam/bool.{lazy_guard}
 import gleam/int
@@ -13,7 +15,8 @@ import pipe
 import gleam/http
 import gleam/result
 import gleam/option.{None, Some}
-import gleam/erlang/process
+import gleam/erlang/process.{type Pid}
+import gleam/erlang/atom.{type Atom}
 import gleam/http/request
 import logging
 import gleam/http/response
@@ -157,17 +160,39 @@ fn listen_on_pipe_for_sse(
   )
 }
 
+fn pipe_entry_receiver_name() -> Atom {
+  atom.create("pipe_receiver")
+}
+
+fn globally_configured_erlang_peers() -> List(Atom) {
+  env.get("ERLANG_PEERS")
+  |> option.map(string.split(_, ","))
+  |> option.lazy_unwrap(fn() { [] })
+  |> list.map(atom.create)
+}
+
+@external(erlang, "erlang", "send")
+fn send_to_remote(destination: #(Atom, Atom), message: a) -> a
+
 fn send_to_pipe(req: Request, pipe_name: String, master: pipemaster.Subject) -> Response {
   case mist.read_body(req, 1024 * 100 * 50) {
     Ok(req) -> {
-      process.send(master, pipemaster.PushEntry(
+      let message = pipemaster.PushEntry(
         pipe_name,
         pipe.Entry(
           method: req.method,
           headers: req.headers,
           body: req.body,
         )
-      ))
+      )
+
+      process.send(master, message)
+
+      globally_configured_erlang_peers()
+      |> list.each(fn(peer) {
+        logging.log(logging.Info, "sending to " <> atom.to_string(peer))
+        send_to_remote(#(pipe_entry_receiver_name(), peer), message)
+      })
 
       response.new(200)
       |> response.set_header("content-type", "text/plain")
@@ -367,6 +392,20 @@ fn start_https_server(
     |> mist.start
 }
 
+@external(erlang, "erlang", "register")
+fn register(name: Atom, pid: Pid) -> Bool
+
+@external(erlang, "hot", "identity")
+fn unsafe_coerce(dyn: dynamic.Dynamic) -> pipemaster.Message
+
+fn forward_pipe_entries_forever(master: pipemaster.Pipemaster) {
+  let selector = process.new_selector()
+    |> process.select_other(unsafe_coerce)
+
+  process.selector_receive_forever(selector) |> process.send(master.data, _)
+  forward_pipe_entries_forever(master)
+}
+
 pub fn main() {
   logging.configure()
   logging.set_level(logging.Info)
@@ -377,6 +416,11 @@ pub fn main() {
     None -> "http://localhost:8080"
   }
   |> uri.parse
+
+  process.spawn(fn() {
+    register(pipe_entry_receiver_name(), process.self())
+    forward_pipe_entries_forever(master)
+  })
 
   let _ = case app_url.scheme, app_url.host {
     Some("https"), Some(host) -> {
