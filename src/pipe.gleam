@@ -17,6 +17,7 @@ import mist
 
 pub type Entry {
   Entry(
+    id: BitArray,
     method: http.Method,
     headers: List(http.Header),
     body: BitArray,

@@ -1,3 +1,4 @@
+import gulid.{type Ulid}
 import gleam/dynamic
 import gleam/list
 import gleam/order
@@ -25,7 +26,7 @@ import gleam/otp/actor
 import mist
 
 @external(erlang, "hot", "make_handler")
-fn make_handler(master: pipemaster.Subject) -> fn(Request) -> Response
+fn make_handler(state: AppState) -> fn(Request) -> Response
 
 type Request = request.Request(mist.Connection)
 type Response = response.Response(mist.ResponseData)
@@ -174,19 +175,21 @@ fn globally_configured_erlang_peers() -> List(Atom) {
 @external(erlang, "erlang", "send")
 fn send_to_remote(destination: #(Atom, Atom), message: a) -> a
 
-fn send_to_pipe(req: Request, pipe_name: String, master: pipemaster.Subject) -> Response {
+fn send_to_pipe(req: Request, pipe_name: String, state: AppState) -> Response {
   case mist.read_body(req, 1024 * 100 * 50) {
     Ok(req) -> {
+      let id = gulid.new()
       let message = pipemaster.PushEntry(
         pipe_name,
         pipe.Entry(
+          id: gulid.to_bitarray(id),
           method: req.method,
-          headers: req.headers,
+          headers: [#("x-snd-id", state.ulid_to_string(id)), ..req.headers],
           body: req.body,
         )
       )
 
-      process.send(master, message)
+      process.send(state.master, message)
 
       globally_configured_erlang_peers()
       |> list.each(fn(peer) {
@@ -259,7 +262,17 @@ fn log_request(req: Request, return: fn() -> Response) -> Response {
   resp
 }
 
-pub fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
+pub type AppState {
+  AppState(
+    master: pipemaster.Subject,
+    ulid_to_string: fn(Ulid) -> String,
+  )
+}
+
+/// This is constructed by make_handler in Erlang code.
+/// Doing so allows us to support hot reload, so we can update handler logic
+/// without worrying about shutting down the server.
+pub fn http_handler(req: Request, state: AppState) -> Response {
   use <- log_request(req)
 
   // It seems the "//" path results in an empty string path
@@ -279,10 +292,10 @@ pub fn http_handler(req: Request, master: pipemaster.Subject) -> Response {
       let pipe_name = compute_pipe_name(parts)
 
       case req.method, infer_requester_type(from_headers: req.headers), pipe_name {
-        http.Get, CurlRequester, Some(pipe_name) -> listen_on_pipe_for_curl(req, pipe_name, master)
-        http.Get, SseRequester, Some(pipe_name) -> listen_on_pipe_for_sse(req, pipe_name, master)
+        http.Get, CurlRequester, Some(pipe_name) -> listen_on_pipe_for_curl(req, pipe_name, state.master)
+        http.Get, SseRequester, Some(pipe_name) -> listen_on_pipe_for_sse(req, pipe_name, state.master)
         http.Get, UnknownRequester, Some(_) -> serve_html("static/view.html", status: 200)
-        http.Post, _, Some(pipe_name) -> send_to_pipe(req, pipe_name, master)
+        http.Post, _, Some(pipe_name) -> send_to_pipe(req, pipe_name, state)
         _, _, Some(_) ->
           response.new(405)
           |> response.set_header("content-type", "text/plain; charset=utf-8")
@@ -335,8 +348,8 @@ fn compute_pipe_name(parts: List(String)) -> option.Option(String) {
   }
 }
 
-fn start_http_server(master: pipemaster.Pipemaster, bind bind: String, on port: Int) {
-  mist.new(make_handler(master.data))
+fn start_http_server(state: AppState, bind bind: String, on port: Int) {
+  mist.new(make_handler(state))
     |> mist.port(port)
     |> mist.bind(bind)
     |> mist.start
@@ -381,11 +394,11 @@ fn start_redirecting_to_https() {
 }
 
 fn start_https_server(
-  master: pipemaster.Pipemaster,
+  state: AppState,
   on interface: String,
   with config: tls.Config,
 ) {
-  mist.new(make_handler(master.data))
+  mist.new(make_handler(state))
     |> mist.port(443)
     |> mist.bind(interface)
     |> mist.with_tls(certfile: config.fullchain, keyfile: config.privkey)
@@ -411,6 +424,11 @@ pub fn main() {
   logging.set_level(logging.Info)
   let assert Ok(master) = pipemaster.new()
 
+  let state = AppState(
+    master: master.data,
+    ulid_to_string: gulid.to_string_function(),
+  )
+
   let assert Ok(app_url) = case env.get("HOOK_URL") {
     Some(url) -> url
     None -> "http://localhost:8080"
@@ -427,7 +445,7 @@ pub fn main() {
       let tls_config_path = "/etc/letsencrypt/renewal/" <> host <> ".conf"
 
       let https_start = tls.parse_config(at: tls_config_path)
-      |> result.map(start_https_server(master, on: "::", with: _))
+      |> result.map(start_https_server(state, on: "::", with: _))
 
       case https_start {
         Ok(Ok(_)) -> Nil
@@ -443,7 +461,7 @@ pub fn main() {
 
     _, host -> {
       let assert Ok(_) = start_http_server(
-        master,
+        state,
         bind: option.unwrap(host,  "localhost"),
         on: option.unwrap(app_url.port, 8080),
       )
