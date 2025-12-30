@@ -326,12 +326,12 @@ fn infer_requester_type(from_headers headers: List(#(String, String))) -> Reques
 
 /// Returns None if the pipe name is considered invalid
 fn compute_pipe_name(parts: List(String)) -> option.Option(String) {
-  let is_invalid = string.contains(_, ".")
-  let return = string.join(parts, "/")
+  let name = string.join(parts, "/")
+  let is_invalid = string.is_empty(name) || string.contains(name, ".")
 
-  case is_invalid(return) {
+  case is_invalid {
     True -> option.None
-    False -> option.Some(return)
+    False -> option.Some(name)
   }
 }
 
