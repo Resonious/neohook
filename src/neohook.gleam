@@ -1,3 +1,6 @@
+import pturso
+import migrations
+import argv
 import gulid.{type Ulid}
 import gleam/dynamic
 import gleam/list
@@ -422,6 +425,30 @@ fn forward_pipe_entries_forever(master: pipemaster.Pipemaster) {
 pub fn main() {
   logging.configure()
   logging.set_level(logging.Info)
+
+  // TODO: maybe the library should get the binary for you..?
+  let assert Ok(turso) = pturso.start("../pturso/rust/target/debug/erso")
+  let db = pturso.connect(turso, "db", log_with: fn(entry) {
+    logging.log(logging.Info, "SQL: " <> entry.sql <> " [" <> int.to_string(entry.duration_ms) <> "ms]")
+  })
+
+  let args = argv.load().arguments
+  use <- lazy_guard(when: args == ["migrate"], return: fn() {
+    let m = migrations.migrate(db, migrations.all_migrations())
+
+    case m {
+      Ok([]) -> logging.log(logging.Info, "No migrations to run")
+      Ok(ran) -> logging.log(logging.Info, "Ran " <> string.join(ran, ", "))
+      Error(#(ran, failed, error)) -> {
+        case ran {
+          [_, ..] as did_run -> logging.log(logging.Info, "Ran " <> string.join(did_run, ", "))
+          _ -> Nil
+        }
+        logging.log(logging.Error, "Failed to run " <> failed <> ": " <> string.inspect(error))
+      }
+    }
+  })
+
   let assert Ok(master) = pipemaster.new()
 
   let state = AppState(
