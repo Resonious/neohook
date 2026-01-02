@@ -1,3 +1,7 @@
+import parrot/dev
+import gleam/dynamic/decode
+import gleam/json
+import neohook/sql
 import pturso
 import migrations
 import argv
@@ -178,6 +182,23 @@ fn globally_configured_erlang_peers() -> List(Atom) {
 @external(erlang, "erlang", "send")
 fn send_to_remote(destination: #(Atom, Atom), message: a) -> a
 
+fn parrot_to_pturso(p: dev.Param) -> pturso.Param {
+  case p {
+    dev.ParamInt(x) -> pturso.Int(x)
+    dev.ParamString(x) -> pturso.String(x)
+    dev.ParamFloat(x) -> pturso.Float(x)
+    dev.ParamBool(True) -> pturso.Int(1)
+    dev.ParamBool(False) -> pturso.Int(0)
+    dev.ParamBitArray(x) -> pturso.Blob(x)
+    dev.ParamTimestamp(x) -> todo as "I guess I need to string fmt this.."
+    dev.ParamDate(x) -> todo as "I guess I need to string fmt this too.."
+    dev.ParamList(_) -> panic as "not supported"
+    dev.ParamDynamic(_) -> panic as "not supported"
+    dev.ParamNullable(Some(x)) -> parrot_to_pturso(x)
+    dev.ParamNullable(None) -> pturso.Null
+  }
+}
+
 fn send_to_pipe(req: Request, pipe_name: String, state: AppState) -> Response {
   case mist.read_body(req, 1024 * 100 * 50) {
     Ok(req) -> {
@@ -193,6 +214,23 @@ fn send_to_pipe(req: Request, pipe_name: String, state: AppState) -> Response {
       )
 
       process.send(state.master, message)
+
+      let headers_json = message.entry.headers
+      |> list.map(fn(x) { #(x.0, json.string(x.1)) })
+      |> json.object
+      |> json.to_string
+
+      let #(sql, with) = sql.insert_pipe_entry(
+        id: message.entry.id,
+        method: Some(message.entry.method |> http.method_to_string),
+        headers: Some(headers_json),
+        body: Some(message.entry.body),
+      )
+      let with = with |> list.map(parrot_to_pturso)
+      case pturso.query(sql, on: state.db, with:, expecting: decode.success(Nil)) {
+        Error(error) -> { echo error Nil }
+        _ -> Nil
+      }
 
       globally_configured_erlang_peers()
       |> list.each(fn(peer) {
@@ -269,6 +307,7 @@ pub type AppState {
   AppState(
     master: pipemaster.Subject,
     ulid_to_string: fn(Ulid) -> String,
+    db: pturso.Connection,
   )
 }
 
@@ -429,7 +468,7 @@ pub fn main() {
   // TODO: maybe the library should get the binary for you..?
   let assert Ok(turso) = pturso.start("../pturso/rust/target/debug/erso")
   let db = pturso.connect(turso, "db", log_with: fn(entry) {
-    logging.log(logging.Info, "SQL: " <> entry.sql <> " [" <> int.to_string(entry.duration_ms) <> "ms]")
+    logging.log(logging.Info, "SQL: " <> string.replace(entry.sql, each: "\n", with: " ") <> " [" <> int.to_string(entry.duration_ms) <> "ms]")
   })
 
   let args = argv.load().arguments
@@ -454,6 +493,7 @@ pub fn main() {
   let state = AppState(
     master: master.data,
     ulid_to_string: gulid.to_string_function(),
+    db:,
   )
 
   let assert Ok(app_url) = case env.get("HOOK_URL") {
