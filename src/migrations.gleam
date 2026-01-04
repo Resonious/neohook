@@ -5,6 +5,27 @@ import gleam/dynamic/decode
 import gleam/result.{try}
 import pturso
 
+/// Add new migrations to the end of this list.
+///
+/// The list order determines the order in which they run, and
+/// the names are just unique identifiers so that we know what
+/// already has run.
+pub fn all_migrations() -> List(#(String, String)) {
+  [
+    #("create pipe entries", "
+      CREATE TABLE pipe_entries (
+        id BLOB PRIMARY KEY,
+        pipe TEXT NOT NULL,
+        method TEXT,
+        headers JSON,
+        body BLOB
+      );
+      CREATE INDEX pipe_entries_pipe
+      ON pipe_entries (pipe, id);
+    "),
+  ]
+}
+
 /// When OK, returns the list of migrations successfully ran.
 /// When Error, returns 3 things:
 ///
@@ -70,22 +91,3 @@ pub fn migrate(
   |> result.map(fn(x) { save_ran(x) x })
   |> result.map_error(fn(x) { save_ran(x.0) x })
 }
-
-/// Add new migrations to the end of this list.
-///
-/// The list order determines the order in which they run, and
-/// the names are just unique identifiers so that we know what
-/// already has run.
-pub fn all_migrations() -> List(#(String, String)) {
-  [
-    #("create pipe entries", "
-      CREATE TABLE pipe_entries (
-        id BLOB PRIMARY KEY,
-        method TEXT,
-        headers JSON,
-        body BLOB
-      );
-    "),
-  ]
-}
-

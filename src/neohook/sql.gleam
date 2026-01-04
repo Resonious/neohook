@@ -7,20 +7,58 @@ import parrot/dev
 
 pub fn insert_pipe_entry(
   id id: BitArray,
+  pipe pipe: String,
   method method: Option(String),
   headers headers: Option(String),
   body body: Option(BitArray),
 ) {
   let sql =
     "INSERT INTO pipe_entries (
-  id, method, headers, body
+  id, pipe, method, headers, body
 ) VALUES (
-  ?, ?, ?, ?
+  ?, ?, ?, ?, ?
 )"
   #(sql, [
     dev.ParamBitArray(id),
+    dev.ParamString(pipe),
     dev.ParamNullable(option.map(method, fn(v) { dev.ParamString(v) })),
     dev.ParamNullable(option.map(headers, fn(v) { dev.ParamString(v) })),
     dev.ParamNullable(option.map(body, fn(v) { dev.ParamBitArray(v) })),
   ])
+}
+
+pub type PipeEntriesByPipe {
+  PipeEntriesByPipe(
+    id: BitArray,
+    method: Option(String),
+    headers: Option(String),
+    body: Option(BitArray),
+  )
+}
+
+pub fn pipe_entries_by_pipe(
+  pipe pipe: String,
+  limit limit: Int,
+  offset offset: Int,
+) {
+  let sql =
+    "SELECT id, method, headers, body
+FROM pipe_entries
+WHERE pipe = ?
+order by id desc
+limit ?
+offset ?"
+  #(
+    sql,
+    [dev.ParamString(pipe), dev.ParamInt(limit), dev.ParamInt(offset)],
+    pipe_entries_by_pipe_decoder(),
+  )
+}
+
+pub fn pipe_entries_by_pipe_decoder() -> decode.Decoder(PipeEntriesByPipe) {
+  use id <- decode.field(0, decode.bit_array)
+  use method <- decode.field(1, decode.optional(decode.string))
+  use headers <- decode.field(2, decode.optional(decode.string))
+  use body <- decode.field(3, decode.optional(decode.bit_array))
+  decode.success(PipeEntriesByPipe(id:, method:, headers:, body:))
 }

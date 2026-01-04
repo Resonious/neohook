@@ -1,5 +1,5 @@
 db
-db-wal
+db-*
 *.beam
 *.ez
 /build

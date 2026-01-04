@@ -1,3 +1,4 @@
+import gleam/bit_array
 import parrot/dev
 import gleam/dynamic/decode
 import gleam/json
@@ -222,6 +223,7 @@ fn send_to_pipe(req: Request, pipe_name: String, state: AppState) -> Response {
 
       let #(sql, with) = sql.insert_pipe_entry(
         id: message.entry.id,
+        pipe: pipe_name,
         method: Some(message.entry.method |> http.method_to_string),
         headers: Some(headers_json),
         body: Some(message.entry.body),
@@ -286,6 +288,19 @@ fn redirect(to location: String) {
   }
 }
 
+/// Returns a function so that it can be used nicely with lazy_guard
+fn bad_request(because reason: String) {
+  fn() {
+    response.new(301)
+    |> response.set_header("content-type", "application/json")
+    |> response.set_body(mist.Bytes(
+      json.object([#("error", json.string(reason))])
+      |> json.to_string_tree
+      |> bytes_tree.from_string_tree
+    ))
+  }
+}
+
 fn log_request(req: Request, return: fn() -> Response) -> Response {
   let method_str = http.method_to_string(req.method)
   let user_agent = request.get_header(req, "user-agent")
@@ -326,9 +341,61 @@ pub fn http_handler(req: Request, state: AppState) -> Response {
 
   // routing
   case request.path_segments(req) {
+    // TODO: "/" needs to look better on curl!!
     [] -> serve_html("static/landing.html", status: 200)
     ["favicon.png"] -> serve_static("static/favicon.png", "image/png")
     ["favicon.svg"] -> serve_static("static/favicon.svg", "image/svg+xml")
+
+    ["api", "pipe_entries"] -> {
+      let pipe = req.query
+        |> option.unwrap("")
+        |> uri.parse_query
+        |> result.unwrap([])
+        |> list.key_find("pipe")
+
+      use <- lazy_guard(when: result.is_error(pipe), return: bad_request(because: "missing `?pipe=...`"))
+      let assert Ok(pipe) = pipe
+
+      let #(sql, with, expecting) = sql.pipe_entries_by_pipe(pipe:, limit: 10, offset: 0)
+      let with = with |> list.map(parrot_to_pturso)
+
+      let render_body = fn(body: BitArray) -> String {
+        case bit_array.to_string(body) {
+          Ok(x) -> x
+          Error(_) -> bit_array.base64_encode(body, True)
+        }
+      }
+
+      let entries_json = pturso.query(sql, on: state.db, with:, expecting:)
+        |> result.unwrap([])
+        |> json.array(fn(e) {
+          let id = e.id |> gulid.from_bitarray |> result.lazy_unwrap(gulid.new)
+          let #(time, _) = id |> gulid.to_parts
+          json.object([
+            #("id", id |> state.ulid_to_string |> json.string),
+            #("timestamp", json.int(time)),
+            #("headers", json.parse(
+              e.headers |> option.unwrap("{}"),
+              decode.dict(decode.string, decode.string)
+            )
+            |> result.lazy_unwrap(dict.new)
+            |> dict.to_list
+            |> list.map(fn(x) { #(x.0, json.string(x.1)) })
+            |> json.object
+            ),
+            #("body", json.string(
+              e.body
+              |> option.lazy_unwrap(fn() { bit_array.from_string("") })
+              |> render_body
+            ))
+          ])
+        })
+        |> json.to_string_tree
+
+      response.new(200)
+      |> response.set_header("content-type", "application/json")
+      |> response.set_body(mist.Bytes(bytes_tree.from_string_tree(entries_json)))
+    }
 
     parts -> {
       let pipe_name = compute_pipe_name(parts)
