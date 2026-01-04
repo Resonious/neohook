@@ -7,6 +7,7 @@ import parrot/dev
 
 pub fn insert_pipe_entry(
   id id: BitArray,
+  node node: String,
   pipe pipe: String,
   method method: Option(String),
   headers headers: Option(String),
@@ -14,12 +15,13 @@ pub fn insert_pipe_entry(
 ) {
   let sql =
     "INSERT INTO pipe_entries (
-  id, pipe, method, headers, body
+  id, node, pipe, method, headers, body
 ) VALUES (
-  ?, ?, ?, ?, ?
+  ?, ?, ?, ?, ?, ?
 )"
   #(sql, [
     dev.ParamBitArray(id),
+    dev.ParamString(node),
     dev.ParamString(pipe),
     dev.ParamNullable(option.map(method, fn(v) { dev.ParamString(v) })),
     dev.ParamNullable(option.map(headers, fn(v) { dev.ParamString(v) })),
@@ -45,9 +47,9 @@ pub fn pipe_entries_by_pipe(
     "SELECT id, method, headers, body
 FROM pipe_entries
 WHERE pipe = ?
-order by id desc
-limit ?
-offset ?"
+ORDER BY id DESC
+LIMIT ?
+OFFSET ?"
   #(
     sql,
     [dev.ParamString(pipe), dev.ParamInt(limit), dev.ParamInt(offset)],
@@ -61,4 +63,67 @@ pub fn pipe_entries_by_pipe_decoder() -> decode.Decoder(PipeEntriesByPipe) {
   use headers <- decode.field(2, decode.optional(decode.string))
   use body <- decode.field(3, decode.optional(decode.bit_array))
   decode.success(PipeEntriesByPipe(id:, method:, headers:, body:))
+}
+
+pub type PipeEntriesFromNodeSince {
+  PipeEntriesFromNodeSince(
+    id: BitArray,
+    node: String,
+    pipe: String,
+    method: Option(String),
+    headers: Option(String),
+    body: Option(BitArray),
+  )
+}
+
+pub fn pipe_entries_from_node_since(node node: String, id id: BitArray) {
+  let sql =
+    "SELECT id, node, pipe, method, headers, body
+FROM pipe_entries
+WHERE node = ?
+AND id > ?"
+  #(
+    sql,
+    [dev.ParamString(node), dev.ParamBitArray(id)],
+    pipe_entries_from_node_since_decoder(),
+  )
+}
+
+pub fn pipe_entries_from_node_since_decoder() -> decode.Decoder(
+  PipeEntriesFromNodeSince,
+) {
+  use id <- decode.field(0, decode.bit_array)
+  use node <- decode.field(1, decode.string)
+  use pipe <- decode.field(2, decode.string)
+  use method <- decode.field(3, decode.optional(decode.string))
+  use headers <- decode.field(4, decode.optional(decode.string))
+  use body <- decode.field(5, decode.optional(decode.bit_array))
+  decode.success(PipeEntriesFromNodeSince(
+    id:,
+    node:,
+    pipe:,
+    method:,
+    headers:,
+    body:,
+  ))
+}
+
+pub type LatestPipeEntries {
+  LatestPipeEntries(node: String, latest_id: BitArray)
+}
+
+pub fn latest_pipe_entries() {
+  let sql =
+    "select node, id as latest_id from (
+  select node, id, row_number()
+  over (partition by node order by id desc) as rn
+  from pipe_entries
+) where rn = 1"
+  #(sql, [], latest_pipe_entries_decoder())
+}
+
+pub fn latest_pipe_entries_decoder() -> decode.Decoder(LatestPipeEntries) {
+  use node <- decode.field(0, decode.string)
+  use latest_id <- decode.field(1, decode.bit_array)
+  decode.success(LatestPipeEntries(node:, latest_id:))
 }

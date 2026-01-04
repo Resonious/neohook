@@ -15,13 +15,18 @@ pub fn all_migrations() -> List(#(String, String)) {
     #("create pipe entries", "
       CREATE TABLE pipe_entries (
         id BLOB PRIMARY KEY,
+        node TEXT NOT NULL,
         pipe TEXT NOT NULL,
         method TEXT,
         headers JSON,
         body BLOB
       );
+
       CREATE INDEX pipe_entries_pipe
       ON pipe_entries (pipe, id);
+
+      CREATE INDEX pipe_entries_node
+      ON pipe_entries (node, id);
     "),
   ]
 }

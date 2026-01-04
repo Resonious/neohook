@@ -1,3 +1,4 @@
+import gleam/string_tree
 import gleam/bit_array
 import parrot/dev
 import gleam/dynamic/decode
@@ -169,15 +170,23 @@ fn listen_on_pipe_for_sse(
   )
 }
 
-fn pipe_entry_receiver_name() -> Atom {
-  atom.create("pipe_receiver")
-}
+@external(erlang, "atoms", "pipe_receiver")
+fn pipe_entry_receiver_name() -> Atom
+
+@external(erlang, "atoms", "db_sync_receiver")
+fn db_sync_receiver_name() -> Atom
 
 fn globally_configured_erlang_peers() -> List(Atom) {
   env.get("ERLANG_PEERS")
   |> option.map(string.split(_, ","))
   |> option.lazy_unwrap(fn() { [] })
   |> list.map(atom.create)
+}
+
+fn my_erlang_node_id() -> Atom {
+  env.get("ERLANG_NODE_IP")
+  |> option.unwrap("localhost")
+  |> atom.create
 }
 
 @external(erlang, "erlang", "send")
@@ -223,6 +232,7 @@ fn send_to_pipe(req: Request, pipe_name: String, state: AppState) -> Response {
 
       let #(sql, with) = sql.insert_pipe_entry(
         id: message.entry.id,
+        node: my_erlang_node_id() |> atom.to_string,
         pipe: pipe_name,
         method: Some(message.entry.method |> http.method_to_string),
         headers: Some(headers_json),
@@ -518,14 +528,127 @@ fn start_https_server(
 fn register(name: Atom, pid: Pid) -> Bool
 
 @external(erlang, "hot", "identity")
-fn unsafe_coerce(dyn: dynamic.Dynamic) -> pipemaster.Message
+fn assume_pipemaster_message(dyn: dynamic.Dynamic) -> pipemaster.Message
+
+@external(erlang, "hot", "identity")
+fn assume_db_sync_message(dyn: dynamic.Dynamic) -> DbSyncMessage
 
 fn forward_pipe_entries_forever(master: pipemaster.Pipemaster) {
   let selector = process.new_selector()
-    |> process.select_other(unsafe_coerce)
+    |> process.select_other(assume_pipemaster_message)
 
   process.selector_receive_forever(selector) |> process.send(master.data, _)
   forward_pipe_entries_forever(master)
+}
+
+type DbSyncMessage {
+  DbSyncHint(
+    who: Atom,
+    latest_pipe_entry_id: Result(BitArray, Nil),
+  )
+
+  DbSyncExec(
+    sql: String,
+    with: List(pturso.Param),
+  )
+}
+
+fn tell_nodes_where_were_at(db: pturso.Connection) {
+  let #(sql, with, expecting) = sql.latest_pipe_entries()
+  let with = with |> list.map(parrot_to_pturso)
+
+  let latest = pturso.query(sql, on: db, with:, expecting:)
+    |> result.lazy_unwrap(list.new)
+    |> list.map(fn(x) {
+      #(x.node, DbSyncHint(who: my_erlang_node_id(), latest_pipe_entry_id: Ok(x.latest_id)))
+    })
+    |> dict.from_list
+
+  globally_configured_erlang_peers() |> list.each(fn(peer) {
+    let peer_string = atom.to_string(peer)
+    dict.get(latest, peer_string) |> result.map(fn(message) {
+      logging.log(logging.Info, "informing " <> peer_string <> " of our state")
+      send_to_remote(#(db_sync_receiver_name(), peer), message)
+    })
+  })
+}
+
+fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(String, List(pturso.Param)) {
+  let sql = string_tree.new()
+    |> string_tree.append("INSERT INTO pipe_entries (id, node, pipe, method, headers, body) VALUES (")
+    |> string_tree.append_tree(
+        entries
+        |> list.map(fn(_) {
+          string_tree.from_string("(?, ?, ?, ?, ?, ?)")
+          })
+        |> list.fold(string_tree.new(), fn(x, y) {
+          string_tree.append(x, ",") |> string_tree.append_tree(y)
+          })
+        )
+    |> string_tree.append(")")
+    |> string_tree.to_string
+
+    let params = entries
+      |> list.flat_map(fn(e) { [
+        pturso.Blob(e.id),
+        pturso.String(e.node),
+        pturso.String(e.pipe),
+        option.map(e.method, pturso.String) |> option.unwrap(pturso.Null),
+        option.map(e.headers, pturso.String) |> option.unwrap(pturso.Null),
+        option.map(e.body, pturso.Blob) |> option.unwrap(pturso.Null),
+      ] })
+
+  #(sql, params)
+}
+
+fn listen_for_db_sync_messages_forever(db: pturso.Connection) {
+  tell_nodes_where_were_at(db)
+
+  let selector = process.new_selector()
+    |> process.select_other(assume_db_sync_message)
+
+  case process.selector_receive(from: selector, within: 30_000) {
+    Ok(DbSyncHint(who, latest_pipe_entry_id)) -> {
+      let me = my_erlang_node_id() |> atom.to_string
+
+      case latest_pipe_entry_id {
+        Error(_) -> Nil
+        Ok(pipe_entry_id) -> {
+          let #(sql, with, expecting) = sql.pipe_entries_from_node_since(
+            node: me, id: pipe_entry_id,
+          )
+          let with = with |> list.map(parrot_to_pturso)
+
+          let entries = pturso.query(sql, on: db, with:, expecting:) |> result.lazy_unwrap(list.new)
+
+          case entries {
+            [_, ..] -> {
+              let #(sql, params) = pipe_entry_bulk_insert(entries)
+              let followup = DbSyncExec(sql:, with: params)
+              send_to_remote(#(db_sync_receiver_name(), who), followup)
+              Nil
+            }
+
+            _ -> Nil
+          }
+        }
+      }
+    }
+
+    Ok(DbSyncExec(sql, with)) -> {
+      logging.log(logging.Info, "Received SQL from peer")
+      case pturso.query(sql, on: db, with:, expecting: decode.success(Nil)) {
+        Ok(_) -> Nil
+        Error(err) -> {
+          logging.log(logging.Error, "Bad SQL over sync? " <> string.inspect(err) <> " -- " <> sql)
+        }
+      }
+    }
+
+    Error(Nil) -> Nil
+  }
+
+  listen_for_db_sync_messages_forever(db)
 }
 
 pub fn main() {
@@ -572,6 +695,11 @@ pub fn main() {
   process.spawn(fn() {
     register(pipe_entry_receiver_name(), process.self())
     forward_pipe_entries_forever(master)
+  })
+
+  process.spawn(fn() {
+    register(db_sync_receiver_name(), process.self())
+    listen_for_db_sync_messages_forever(db)
   })
 
   let _ = case app_url.scheme, app_url.host {
