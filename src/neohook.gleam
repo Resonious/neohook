@@ -656,7 +656,10 @@ pub fn main() {
   logging.set_level(logging.Info)
 
   // TODO: maybe the library should get the binary for you..?
-  let assert Ok(turso) = pturso.start("../pturso/rust/target/debug/erso")
+  let pturso_start = pturso.start("/var/www/erso")
+    |> result.lazy_or(fn() { pturso.start("../pturso/rust/target/debug/erso") })
+  let assert Ok(turso) = pturso_start
+
   let db = pturso.connect(turso, "db", log_with: fn(entry) {
     logging.log(logging.Info, "SQL: " <> string.replace(entry.sql, each: "\n", with: " ") <> " [" <> int.to_string(entry.duration_ms) <> "ms]")
   })
