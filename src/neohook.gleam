@@ -37,6 +37,9 @@ import mist
 @external(erlang, "hot", "make_handler")
 fn make_handler(state: AppState) -> fn(Request) -> Response
 
+@external(erlang, "hot", "db_sync_loop")
+fn hot_db_sync_loop(db: pturso.Connection) -> Nil
+
 type Request = request.Request(mist.Connection)
 type Response = response.Response(mist.ResponseData)
 
@@ -184,9 +187,8 @@ fn globally_configured_erlang_peers() -> List(Atom) {
 }
 
 fn my_erlang_node_id() -> Atom {
-  env.get("ERLANG_NODE_IP")
-  |> option.unwrap("localhost")
-  |> atom.create
+  let ip = env.get("ERLANG_NODE_IP") |> option.unwrap("localhost")
+  atom.create("neohook@" <> ip)
 }
 
 @external(erlang, "erlang", "send")
@@ -527,6 +529,22 @@ fn start_https_server(
 @external(erlang, "erlang", "register")
 fn register(name: Atom, pid: Pid) -> Bool
 
+@external(erlang, "persistent_term", "put")
+fn persistent_term_put(key: Atom, value: a) -> Nil
+
+@external(erlang, "persistent_term", "get")
+fn persistent_term_get(key: Atom) -> a
+
+@external(erlang, "atoms", "db_connection")
+fn db_connection_key() -> Atom
+
+/// Called via RPC from entrypoint.sh migrate command.
+/// This allows migrations to run in the same process that owns the DB connection.
+pub fn run_migrations() -> Result(List(String), #(List(String), String, pturso.Error)) {
+  let db = persistent_term_get(db_connection_key())
+  migrations.migrate(db, migrations.all_migrations())
+}
+
 @external(erlang, "hot", "identity")
 fn assume_pipemaster_message(dyn: dynamic.Dynamic) -> pipemaster.Message
 
@@ -559,15 +577,27 @@ fn tell_nodes_where_were_at(db: pturso.Connection) {
 
   let latest = pturso.query(sql, on: db, with:, expecting:)
     |> result.lazy_unwrap(list.new)
-    |> list.map(fn(x) {
-      #(x.node, DbSyncHint(who: my_erlang_node_id(), latest_pipe_entry_id: Ok(x.latest_id)))
+    |> list.map(fn(x) { #(x.node, x.latest_id) })
+    |> dict.from_list
+
+  let peers = globally_configured_erlang_peers()
+
+  let all = peers
+    |> list.map(fn(peer) {
+      let peer_string = atom.to_string(peer)
+      #(
+        peer |> atom.to_string,
+        DbSyncHint(
+          who: my_erlang_node_id(),
+          latest_pipe_entry_id: dict.get(latest, peer_string),
+        ),
+      )
     })
     |> dict.from_list
 
-  globally_configured_erlang_peers() |> list.each(fn(peer) {
+  peers |> list.each(fn(peer) {
     let peer_string = atom.to_string(peer)
-    dict.get(latest, peer_string) |> result.map(fn(message) {
-      logging.log(logging.Info, "informing " <> peer_string <> " of our state")
+    dict.get(all, peer_string) |> result.map(fn(message) {
       send_to_remote(#(db_sync_receiver_name(), peer), message)
     })
   })
@@ -575,17 +605,12 @@ fn tell_nodes_where_were_at(db: pturso.Connection) {
 
 fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(String, List(pturso.Param)) {
   let sql = string_tree.new()
-    |> string_tree.append("INSERT INTO pipe_entries (id, node, pipe, method, headers, body) VALUES (")
+    |> string_tree.append("INSERT INTO pipe_entries (id, node, pipe, method, headers, body) VALUES ")
     |> string_tree.append_tree(
         entries
-        |> list.map(fn(_) {
-          string_tree.from_string("(?, ?, ?, ?, ?, ?)")
-          })
-        |> list.fold(string_tree.new(), fn(x, y) {
-          string_tree.append(x, ",") |> string_tree.append_tree(y)
-          })
-        )
-    |> string_tree.append(")")
+        |> list.map(fn(_) { string_tree.from_string("(?, ?, ?, ?, ?, ?)") })
+        |> string_tree.join(","))
+    |> string_tree.append(" ON CONFLICT DO NOTHING")
     |> string_tree.to_string
 
     let params = entries
@@ -601,7 +626,7 @@ fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(Stri
   #(sql, params)
 }
 
-fn listen_for_db_sync_messages_forever(db: pturso.Connection) {
+pub fn db_sync_loop(db: pturso.Connection) {
   tell_nodes_where_were_at(db)
 
   let selector = process.new_selector()
@@ -611,27 +636,28 @@ fn listen_for_db_sync_messages_forever(db: pturso.Connection) {
     Ok(DbSyncHint(who, latest_pipe_entry_id)) -> {
       let me = my_erlang_node_id() |> atom.to_string
 
-      case latest_pipe_entry_id {
-        Error(_) -> Nil
-        Ok(pipe_entry_id) -> {
-          let #(sql, with, expecting) = sql.pipe_entries_from_node_since(
-            node: me, id: pipe_entry_id,
-          )
-          let with = with |> list.map(parrot_to_pturso)
+      let latest_pipe_entry_id = case latest_pipe_entry_id {
+        Ok(p) -> p
+        Error(Nil) -> gulid.from_parts(0, 0) |> gulid.to_bitarray
+      }
 
-          let entries = pturso.query(sql, on: db, with:, expecting:) |> result.lazy_unwrap(list.new)
+      let #(sql, with, expecting) = sql.pipe_entries_from_node_since(
+        node: me, id: latest_pipe_entry_id,
+      )
+      let with = with |> list.map(parrot_to_pturso)
 
-          case entries {
-            [_, ..] -> {
-              let #(sql, params) = pipe_entry_bulk_insert(entries)
-              let followup = DbSyncExec(sql:, with: params)
-              send_to_remote(#(db_sync_receiver_name(), who), followup)
-              Nil
-            }
+      let entries = pturso.query(sql, on: db, with:, expecting:) |> result.lazy_unwrap(list.new)
 
-            _ -> Nil
-          }
+      case entries {
+        [_, ..] -> {
+          let #(sql, params) = pipe_entry_bulk_insert(entries)
+          let followup = DbSyncExec(sql:, with: params)
+          logging.log(logging.Info, "Sending " <> int.to_string(list.length(entries)) <> " pipe entries")
+          send_to_remote(#(db_sync_receiver_name(), who), followup)
+          Nil
         }
+
+        _ -> Nil
       }
     }
 
@@ -648,7 +674,7 @@ fn listen_for_db_sync_messages_forever(db: pturso.Connection) {
     Error(Nil) -> Nil
   }
 
-  listen_for_db_sync_messages_forever(db)
+  hot_db_sync_loop(db)
 }
 
 pub fn main() {
@@ -656,13 +682,15 @@ pub fn main() {
   logging.set_level(logging.Info)
 
   // TODO: maybe the library should get the binary for you..?
-  let pturso_start = pturso.start("/var/www/erso")
-    |> result.lazy_or(fn() { pturso.start("../pturso/rust/target/debug/erso") })
-  let assert Ok(turso) = pturso_start
+  let erso_path = env.get("ERSO") |> option.unwrap("/var/www/erso")
+  let assert Ok(turso) = pturso.start(erso_path)
 
   let db = pturso.connect(turso, "db", log_with: fn(entry) {
     logging.log(logging.Info, "SQL: " <> string.replace(entry.sql, each: "\n", with: " ") <> " [" <> int.to_string(entry.duration_ms) <> "ms]")
   })
+
+  // Store db connection for RPC-based migrations
+  persistent_term_put(db_connection_key(), db)
 
   let args = argv.load().arguments
   use <- lazy_guard(when: args == ["migrate"], return: fn() {
@@ -702,7 +730,7 @@ pub fn main() {
 
   process.spawn(fn() {
     register(db_sync_receiver_name(), process.self())
-    listen_for_db_sync_messages_forever(db)
+    db_sync_loop(db)
   })
 
   let _ = case app_url.scheme, app_url.host {

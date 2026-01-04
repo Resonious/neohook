@@ -114,11 +114,12 @@ pub type LatestPipeEntries {
 
 pub fn latest_pipe_entries() {
   let sql =
-    "select node, id as latest_id from (
-  select node, id, row_number()
-  over (partition by node order by id desc) as rn
-  from pipe_entries
-) where rn = 1"
+    "select node, id as latest_id
+from pipe_entries p
+where id = (
+  select max(id) from pipe_entries
+  where node = p.node
+)"
   #(sql, [], latest_pipe_entries_decoder())
 }
 

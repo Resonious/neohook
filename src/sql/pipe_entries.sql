@@ -25,4 +25,4 @@ from pipe_entries p
 where id = (
   select max(id) from pipe_entries
   where node = p.node
-)
+);
