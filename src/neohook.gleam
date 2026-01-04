@@ -191,8 +191,8 @@ fn parrot_to_pturso(p: dev.Param) -> pturso.Param {
     dev.ParamBool(True) -> pturso.Int(1)
     dev.ParamBool(False) -> pturso.Int(0)
     dev.ParamBitArray(x) -> pturso.Blob(x)
-    dev.ParamTimestamp(x) -> todo as "I guess I need to string fmt this.."
-    dev.ParamDate(x) -> todo as "I guess I need to string fmt this too.."
+    dev.ParamTimestamp(_) -> panic as "not supported"
+    dev.ParamDate(_) -> panic as "not supported"
     dev.ParamList(_) -> panic as "not supported"
     dev.ParamDynamic(_) -> panic as "not supported"
     dev.ParamNullable(Some(x)) -> parrot_to_pturso(x)
