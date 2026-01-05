@@ -109,22 +109,19 @@ pub fn pipe_entries_from_node_since_decoder() -> decode.Decoder(
 }
 
 pub type LatestPipeEntries {
-  LatestPipeEntries(node: String, latest_id: BitArray)
+  LatestPipeEntries(node: String, latest_id: Option(decode.Dynamic))
 }
 
 pub fn latest_pipe_entries() {
   let sql =
-    "select node, id as latest_id
-from pipe_entries p
-where id = (
-  select max(id) from pipe_entries
-  where node = p.node
-)"
+    "select node, max(id) as latest_id
+from pipe_entries
+group by node"
   #(sql, [], latest_pipe_entries_decoder())
 }
 
 pub fn latest_pipe_entries_decoder() -> decode.Decoder(LatestPipeEntries) {
   use node <- decode.field(0, decode.string)
-  use latest_id <- decode.field(1, decode.bit_array)
+  use latest_id <- decode.field(1, decode.optional(decode.dynamic))
   decode.success(LatestPipeEntries(node:, latest_id:))
 }

@@ -6,7 +6,6 @@ import gleam/json
 import neohook/sql
 import pturso
 import migrations
-import argv
 import gulid.{type Ulid}
 import gleam/dynamic
 import gleam/list
@@ -37,8 +36,11 @@ import mist
 @external(erlang, "hot", "make_handler")
 fn make_handler(state: AppState) -> fn(Request) -> Response
 
-@external(erlang, "hot", "db_sync_loop")
-fn hot_db_sync_loop(db: pturso.Connection) -> Nil
+@external(erlang, "hot", "db_receive_loop")
+fn hot_db_receive_loop(db: pturso.Connection) -> Nil
+
+@external(erlang, "hot", "db_send_loop")
+fn hot_db_send_loop(db: pturso.Connection) -> Nil
 
 type Request = request.Request(mist.Connection)
 type Response = response.Response(mist.ResponseData)
@@ -232,9 +234,11 @@ fn send_to_pipe(req: Request, pipe_name: String, state: AppState) -> Response {
       |> json.object
       |> json.to_string
 
+      let node = my_erlang_node_id() |> atom.to_string
+
       let #(sql, with) = sql.insert_pipe_entry(
         id: message.entry.id,
-        node: my_erlang_node_id() |> atom.to_string,
+        node:,
         pipe: pipe_name,
         method: Some(message.entry.method |> http.method_to_string),
         headers: Some(headers_json),
@@ -246,10 +250,22 @@ fn send_to_pipe(req: Request, pipe_name: String, state: AppState) -> Response {
         _ -> Nil
       }
 
+      // Update peers (both database and realtime)
+      let #(sql, params) = pipe_entry_bulk_insert([sql.PipeEntriesFromNodeSince(
+        id: message.entry.id,
+        node:,
+        pipe: pipe_name,
+        method: Some(message.entry.method |> http.method_to_string),
+        headers: Some(headers_json),
+        body: Some(message.entry.body),
+      )])
+      let sync_command = DbSyncExec(sql:, with: params)
+
       globally_configured_erlang_peers()
       |> list.each(fn(peer) {
         logging.log(logging.Info, "sending to " <> atom.to_string(peer))
         send_to_remote(#(pipe_entry_receiver_name(), peer), message)
+        send_to_remote(#(db_sync_receiver_name(), peer), sync_command)
       })
 
       response.new(200)
@@ -529,22 +545,6 @@ fn start_https_server(
 @external(erlang, "erlang", "register")
 fn register(name: Atom, pid: Pid) -> Bool
 
-@external(erlang, "persistent_term", "put")
-fn persistent_term_put(key: Atom, value: a) -> Nil
-
-@external(erlang, "persistent_term", "get")
-fn persistent_term_get(key: Atom) -> a
-
-@external(erlang, "atoms", "db_connection")
-fn db_connection_key() -> Atom
-
-/// Called via RPC from entrypoint.sh migrate command.
-/// This allows migrations to run in the same process that owns the DB connection.
-pub fn run_migrations() -> Result(List(String), #(List(String), String, pturso.Error)) {
-  let db = persistent_term_get(db_connection_key())
-  migrations.migrate(db, migrations.all_migrations())
-}
-
 @external(erlang, "hot", "identity")
 fn assume_pipemaster_message(dyn: dynamic.Dynamic) -> pipemaster.Message
 
@@ -575,9 +575,17 @@ fn tell_nodes_where_were_at(db: pturso.Connection) {
   let #(sql, with, expecting) = sql.latest_pipe_entries()
   let with = with |> list.map(parrot_to_pturso)
 
+  // Parrot/sqlc doesn't understand max(id)
+  let hack = fn(x) {
+    let fake_id = fn() { gulid.new() |> gulid.to_bitarray }
+    option.lazy_unwrap(x, fn() { fake_id() |> dynamic.bit_array })
+    |> decode.run(decode.bit_array)
+    |> result.lazy_unwrap(fake_id)
+  }
+
   let latest = pturso.query(sql, on: db, with:, expecting:)
     |> result.lazy_unwrap(list.new)
-    |> list.map(fn(x) { #(x.node, x.latest_id) })
+    |> list.map(fn(x) { #(x.node, hack(x.latest_id)) })
     |> dict.from_list
 
   let peers = globally_configured_erlang_peers()
@@ -626,14 +634,12 @@ fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(Stri
   #(sql, params)
 }
 
-pub fn db_sync_loop(db: pturso.Connection) {
-  tell_nodes_where_were_at(db)
-
+pub fn db_receive_loop(db: pturso.Connection) {
   let selector = process.new_selector()
     |> process.select_other(assume_db_sync_message)
 
-  case process.selector_receive(from: selector, within: 30_000) {
-    Ok(DbSyncHint(who, latest_pipe_entry_id)) -> {
+  case process.selector_receive_forever(from: selector) {
+    DbSyncHint(who, latest_pipe_entry_id) -> {
       let me = my_erlang_node_id() |> atom.to_string
 
       let latest_pipe_entry_id = case latest_pipe_entry_id {
@@ -661,7 +667,7 @@ pub fn db_sync_loop(db: pturso.Connection) {
       }
     }
 
-    Ok(DbSyncExec(sql, with)) -> {
+    DbSyncExec(sql, with) -> {
       logging.log(logging.Info, "Received SQL from peer")
       case pturso.query(sql, on: db, with:, expecting: decode.success(Nil)) {
         Ok(_) -> Nil
@@ -670,11 +676,15 @@ pub fn db_sync_loop(db: pturso.Connection) {
         }
       }
     }
-
-    Error(Nil) -> Nil
   }
 
-  hot_db_sync_loop(db)
+  hot_db_receive_loop(db)
+}
+
+pub fn db_send_loop(db: pturso.Connection) {
+  tell_nodes_where_were_at(db)
+  process.sleep(300_000)
+  hot_db_send_loop(db)
 }
 
 pub fn main() {
@@ -689,19 +699,13 @@ pub fn main() {
     logging.log(logging.Info, "SQL: " <> string.replace(entry.sql, each: "\n", with: " ") <> " [" <> int.to_string(entry.duration_ms) <> "ms]")
   })
 
-  // Store db connection for RPC-based migrations
-  persistent_term_put(db_connection_key(), db)
-
-  let args = argv.load().arguments
-  use <- lazy_guard(when: args == ["migrate"], return: fn() {
-    let m = migrations.migrate(db, migrations.all_migrations())
-
-    case m {
+  process.spawn(fn() {
+    case migrations.migrate(db, migrations.all_migrations()) {
       Ok([]) -> logging.log(logging.Info, "No migrations to run")
-      Ok(ran) -> logging.log(logging.Info, "Ran " <> string.join(ran, ", "))
+      Ok(ran) -> logging.log(logging.Info, "Ran migrations: " <> string.join(ran, ", "))
       Error(#(ran, failed, error)) -> {
         case ran {
-          [_, ..] as did_run -> logging.log(logging.Info, "Ran " <> string.join(did_run, ", "))
+          [_, ..] as did_run -> logging.log(logging.Info, "Ran migrations: " <> string.join(did_run, ", "))
           _ -> Nil
         }
         logging.log(logging.Error, "Failed to run " <> failed <> ": " <> string.inspect(error))
@@ -730,7 +734,11 @@ pub fn main() {
 
   process.spawn(fn() {
     register(db_sync_receiver_name(), process.self())
-    db_sync_loop(db)
+    db_receive_loop(db)
+  })
+
+  process.spawn(fn() {
+    db_send_loop(db)
   })
 
   let _ = case app_url.scheme, app_url.host {
