@@ -1,3 +1,4 @@
+import neohook/http_wrapper
 import termcolor
 import gleam/bool.{guard}
 import gleam/bytes_tree
@@ -13,7 +14,6 @@ import gleam/otp/actor
 import gleam/string_tree
 import gleam/http
 import json_pretty
-import mist
 
 pub type Entry {
   Entry(
@@ -30,7 +30,7 @@ pub type Message {
 
 pub type Kind {
   Curl(process.Subject(bytes_tree.BytesTree), process.Pid)
-  Sse(mist.SSEConnection)
+  Sse(http_wrapper.SSEConnection)
 
   Dead
 }
@@ -41,15 +41,12 @@ pub fn new(kind: Kind) {
   |> actor.start
 }
 
-fn send_sse_data(conn: mist.SSEConnection, data: String) -> Result(Nil, Nil) {
-  mist.event(string_tree.from_string(data))
-  |> mist.send_event(conn, _)
+fn send_sse_data(conn: http_wrapper.SSEConnection, data: String) -> Result(Nil, Nil) {
+  http_wrapper.send_sse_event(string_tree.from_string(data), to: conn)
 }
 
-fn send_sse_named_event(conn: mist.SSEConnection, name: String, data: String) -> Result(Nil, Nil) {
-  mist.event(string_tree.from_string(data))
-  |> mist.event_name(name)
-  |> mist.send_event(conn, _)
+fn send_sse_named_event(conn: http_wrapper.SSEConnection, name: String, data: String) -> Result(Nil, Nil) {
+  http_wrapper.send_sse_named_event(string_tree.from_string(data), name:, to: conn)
 }
 
 pub fn handle(
