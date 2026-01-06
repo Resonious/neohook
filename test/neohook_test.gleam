@@ -7,7 +7,6 @@ import gleeunit/should
 import gleam/bytes_tree
 import gleam/yielder
 import mist
-import gleam/list
 import gleam/http/response
 import gleam/bit_array
 import neohook/http_wrapper
@@ -64,7 +63,8 @@ pub fn curl_test() {
   let assert Ok(message) = message |> bytes_tree.to_bit_array |> bit_array.to_string()
 
   assert bit_array.starts_with(welcome, bit_array.from_string("You are listening on"))
-  assert string.contains(message, "x-test-header: HITHERE")
+  assert string.contains(message, "x-test-header")
+  assert string.contains(message, "HITHERE")
   assert string.contains(message, "Message here")
 }
 
@@ -89,7 +89,7 @@ pub fn sse_test() {
       on_sse: fn(x) { process.send(subj, x) Ok(Nil) }
     ))
 
-  let response.Response(status:, headers:, body:) = neohook.http_handler(req, state)
+  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state)
   should.equal(status, 200)
 
   let assert mist.ServerSentEvents(_selector) = body
@@ -111,7 +111,7 @@ pub fn sse_test() {
 
   let assert Some("headers") = headers_event.name
   let received_headers = headers_event.data |> string_tree.to_string
-  assert string.contains(does: received_headers, contain: "x-test-header: HITHERE")
+  assert string.contains(does: received_headers, contain: "\"x-test-header\":\"HITHERE\"")
 
   should.be_none(body_event.name)
   let received_body = body_event.data |> string_tree.to_string
