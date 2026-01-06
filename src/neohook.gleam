@@ -4,6 +4,7 @@ import parrot/dev
 import gleam/dynamic/decode
 import gleam/json
 import neohook/sql
+import neohook/http_wrapper.{type Request, type Response}
 import pturso
 import migrations
 import gulid.{type Ulid}
@@ -34,16 +35,13 @@ import gleam/otp/actor
 import mist
 
 @external(erlang, "hot", "make_handler")
-fn make_handler(state: AppState) -> fn(Request) -> Response
+fn make_handler(state: AppState) -> fn(request.Request(mist.Connection)) -> Response
 
 @external(erlang, "hot", "db_receive_loop")
 fn hot_db_receive_loop(db: pturso.Connection) -> Nil
 
 @external(erlang, "hot", "db_send_loop")
 fn hot_db_send_loop(db: pturso.Connection) -> Nil
-
-type Request = request.Request(mist.Connection)
-type Response = response.Response(mist.ResponseData)
 
 type SseState {
   SseState(
@@ -147,7 +145,7 @@ fn listen_on_pipe_for_sse(
   pipe_name: String,
   master: pipemaster.Subject,
 ) -> Response {
-  mist.server_sent_events(
+  http_wrapper.server_sent_events(
     req,
     response.new(200) |> response.set_header("content-type", "text/event-stream"),
     init: fn(subject) {
@@ -214,7 +212,7 @@ fn parrot_to_pturso(p: dev.Param) -> pturso.Param {
 }
 
 fn send_to_pipe(req: Request, pipe_name: String, state: AppState) -> Response {
-  case mist.read_body(req, 1024 * 100 * 50) {
+  case http_wrapper.read_body(req, 1024 * 100 * 50) {
     Ok(req) -> {
       let id = gulid.new()
       let message = pipemaster.PushEntry(
@@ -354,9 +352,15 @@ pub type AppState {
   )
 }
 
-/// This is constructed by make_handler in Erlang code.
+/// This is called by make_handler in Erlang code.
 /// Doing so allows us to support hot reload, so we can update handler logic
 /// without worrying about shutting down the server.
+pub fn http_handler_for_mist(req: request.Request(mist.Connection), state: AppState) -> Response {
+  let request.Request(body: conn, ..) = req
+  let req = http_wrapper.convert_request(req, http_wrapper.MistBody(conn))
+  http_handler(req, state)
+}
+
 pub fn http_handler(req: Request, state: AppState) -> Response {
   use <- log_request(req)
 

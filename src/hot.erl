@@ -2,7 +2,7 @@
 -export([make_handler/1, identity/1, db_receive_loop/1, db_send_loop/1]).
 
 make_handler(State) ->
-    fun(Req) -> neohook:http_handler(Req, State) end.
+    fun(Req) -> neohook:http_handler_for_mist(Req, State) end.
 
 identity(X) -> X.
 
