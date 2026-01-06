@@ -10,8 +10,15 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      ERSO: ${{ github.workspace }}/erso
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download erso binary
+        run: |
+          curl -L -o erso https://github.com/Resonious/pturso/releases/download/0.0.1/erso-x86_64-linux
+          chmod +x erso
 
       - uses: erlef/setup-beam@v1
         with:
