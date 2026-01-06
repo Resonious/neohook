@@ -21,8 +21,12 @@ import pturso
 import gleeunit
 
 pub fn main() -> Nil {
+  delete_files_matching("test/db*")
   gleeunit.main()
 }
+
+@external(erlang, "fs", "delete_files_matching")
+fn delete_files_matching(pattern: String) -> Nil
 
 pub fn curl_test() {
   let assert Ok(master) = pipemaster.new()
@@ -40,7 +44,7 @@ pub fn curl_test() {
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse))
 
-  let response.Response(status:, headers:, body:) = neohook.http_handler(req, state)
+  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state)
   should.equal(status, 200)
   // assert list.contains(headers, #("content-type", "application/octet-stream"))
 
