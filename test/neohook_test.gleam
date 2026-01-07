@@ -25,9 +25,6 @@ pub fn main() -> Nil {
   gleeunit.main()
 }
 
-@external(erlang, "fs", "delete_files_matching")
-fn delete_files_matching(pattern: String) -> Nil
-
 pub fn curl_test() {
   let assert Ok(master) = pipemaster.new()
   let db = turso_connection()
@@ -138,3 +135,6 @@ fn turso_connection() -> pturso.Connection {
 fn no_sse(_event: http_wrapper.SSEEvent) -> Result(Nil, Nil) {
   Error(Nil)
 }
+
+@external(erlang, "fs", "delete_files_matching")
+fn delete_files_matching(pattern: String) -> Nil
