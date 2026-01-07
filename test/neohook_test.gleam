@@ -277,7 +277,7 @@ pub fn peer_bug_test() {
   should.equal(status, 200)
 
   // Suppose peer2 is down
-  drop_db_syncs(peer2, db2) |> should.not_equal(0)
+  drop_db_syncs(peer2) |> should.not_equal(0)
 
   // Send something else with peer1
   let req = request.new()
@@ -339,12 +339,12 @@ fn process_db_syncs(peer: neohook.Peer, db: pturso.Connection) -> Int {
   yielder.repeatedly(fn() { neohook.peer_receive_db_sync(peer, within: 100) })
     |> yielder.take_while(result.is_ok)
     |> yielder.filter_map(function.identity)
-    |> yielder.map(neohook.db_receive_loop_iter(_, db))
+    |> yielder.map(neohook.db_receive_loop_iter(_, db, peer))
     |> yielder.to_list
     |> list.length
 }
 
-fn drop_db_syncs(peer: neohook.Peer, db: pturso.Connection) -> Int {
+fn drop_db_syncs(peer: neohook.Peer) -> Int {
   yielder.repeatedly(fn() { neohook.peer_receive_db_sync(peer, within: 100) })
     |> yielder.take_while(result.is_ok)
     |> yielder.filter_map(function.identity)

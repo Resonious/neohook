@@ -38,10 +38,10 @@ import mist
 fn make_handler(state: AppState) -> fn(request.Request(mist.Connection)) -> Response
 
 @external(erlang, "hot", "db_receive_loop")
-fn hot_db_receive_loop(db: pturso.Connection) -> Nil
+fn hot_db_receive_loop(peer: Peer, db: pturso.Connection) -> Nil
 
 @external(erlang, "hot", "db_send_loop")
-fn hot_db_send_loop(db: pturso.Connection) -> Nil
+fn hot_db_send_loop(db: pturso.Connection, peers: List(Peer), me: Peer) -> Nil
 
 type SseState {
   SseState(
@@ -303,17 +303,8 @@ fn send_to_pipe(
         _ -> Nil
       }
 
-      // Update peers (both database and realtime)
-      // TODO dont do this as it interferes witb monotonic assumption diring routine sync
-      let #(sql, params) = pipe_entry_bulk_insert([sql.PipeEntriesFromNodeSince(
-        id: message.entry.id,
-        node: peer_node(state.self),
-        pipe: pipe_name,
-        method: Some(message.entry.method |> http.method_to_string),
-        headers: Some(headers_json),
-        body: Some(message.entry.body),
-      )])
-      let sync_command = DbSyncExec(sql:, with: params)
+      // Update peers
+      let sync_command = DbSyncNewEntry(who: state.self)
 
       state.peers |> list.each(fn(peer) {
         logging.log(logging.Info, "sending to " <> peer_node(peer))
@@ -621,6 +612,11 @@ pub fn forward_pipe_entries_forever(master: pipemaster.Pipemaster) {
 }
 
 pub type DbSyncMessage {
+  /// Tells a node that a new entry has been inserted.
+  /// Unfortunately right now all the node can do from here is call tell_nodes_where_were_at
+  /// which results in a lot of back-and-forth.
+  DbSyncNewEntry(who: Peer)
+
   DbSyncHint(
     who: Peer,
     latest_pipe_entry_id: Result(BitArray, Nil),
@@ -651,7 +647,7 @@ pub fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Pe
 
   let all = peers
     |> list.map(fn(peer) {
-      let peer_string = peer_to_string(peer)
+      let peer_string = peer_node(peer)
       #(
         peer_string,
         DbSyncHint(
@@ -663,15 +659,11 @@ pub fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Pe
     |> dict.from_list
 
   peers |> list.each(fn(peer) {
-    let peer_string = peer_to_string(peer)
+    let peer_string = peer_node(peer)
     dict.get(all, peer_string) |> result.map(fn(message) {
       peer_send_db_sync(peer, message)
     })
   })
-}
-
-fn peer_to_string(peer: Peer) -> String {
-  peer_node(peer)
 }
 
 fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(String, List(pturso.Param)) {
@@ -697,18 +689,20 @@ fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(Stri
   #(sql, params)
 }
 
-pub fn db_receive_loop_iter(message: DbSyncMessage, db: pturso.Connection) {
+pub fn db_receive_loop_iter(message: DbSyncMessage, db: pturso.Connection, me: Peer) {
   case message {
-    DbSyncHint(who, latest_pipe_entry_id) -> {
-      let me = my_erlang_node_id() |> atom.to_string
+    DbSyncNewEntry(who:) -> {
+      tell_nodes_where_were_at(db, [who], me)
+    }
 
+    DbSyncHint(who, latest_pipe_entry_id) -> {
       let latest_pipe_entry_id = case latest_pipe_entry_id {
         Ok(p) -> p
         Error(Nil) -> gulid.from_parts(0, 0) |> gulid.to_bitarray
       }
 
       let #(sql, with, expecting) = sql.pipe_entries_from_node_since(
-        node: me, id: latest_pipe_entry_id,
+        node: peer_node(me), id: latest_pipe_entry_id,
       )
       let with = with |> list.map(parrot_to_pturso)
 
@@ -758,15 +752,15 @@ pub fn peer_receive_db_sync(peer: Peer, within within: Int) {
 }
 
 pub fn db_receive_loop(peer: Peer, db: pturso.Connection) {
-  peer_receive_db_sync_forever(peer) |> db_receive_loop_iter(db)
+  peer_receive_db_sync_forever(peer) |> db_receive_loop_iter(db, peer)
 
-  hot_db_receive_loop(db)
+  hot_db_receive_loop(peer, db)
 }
 
 pub fn db_send_loop(db: pturso.Connection, peers: List(Peer), me: Peer) {
   tell_nodes_where_were_at(db, peers, me)
   process.sleep(300_000)
-  hot_db_send_loop(db)
+  hot_db_send_loop(db, peers, me)
 }
 
 pub fn main() {
