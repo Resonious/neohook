@@ -193,7 +193,7 @@ fn globally_configured_erlang_peers() -> List(Peer) {
   })
 }
 
-fn my_erlang_node_id() -> Atom {
+pub fn my_erlang_node_id() -> Atom {
   let ip = env.get("ERLANG_NODE_IP") |> option.unwrap("localhost")
   atom.create("neohook@" <> ip)
 }
@@ -567,7 +567,7 @@ fn start_https_server(
 }
 
 @external(erlang, "erlang", "register")
-fn register(name: Atom, pid: Pid) -> Bool
+pub fn register(name: Atom, pid: Pid) -> Bool
 
 @external(erlang, "hot", "identity")
 fn assume_pipemaster_message(dyn: dynamic.Dynamic) -> pipemaster.Message
@@ -575,7 +575,7 @@ fn assume_pipemaster_message(dyn: dynamic.Dynamic) -> pipemaster.Message
 @external(erlang, "hot", "identity")
 fn assume_db_sync_message(dyn: dynamic.Dynamic) -> DbSyncMessage
 
-fn forward_pipe_entries_forever(master: pipemaster.Pipemaster) {
+pub fn forward_pipe_entries_forever(master: pipemaster.Pipemaster) {
   let selector = process.new_selector()
     |> process.select_other(assume_pipemaster_message)
 
@@ -660,12 +660,12 @@ fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(Stri
   #(sql, params)
 }
 
-pub fn db_receive_loop(db: pturso.Connection) {
+pub fn db_receive_loop_iter(db: pturso.Connection, wait_for wait_ms: Int) {
   let selector = process.new_selector()
     |> process.select_other(assume_db_sync_message)
 
-  case process.selector_receive_forever(from: selector) {
-    DbSyncHint(who, latest_pipe_entry_id) -> {
+  case process.selector_receive(from: selector, within: wait_ms) {
+    Ok(DbSyncHint(who, latest_pipe_entry_id)) -> {
       let me = my_erlang_node_id() |> atom.to_string
 
       let latest_pipe_entry_id = case latest_pipe_entry_id {
@@ -686,23 +686,30 @@ pub fn db_receive_loop(db: pturso.Connection) {
           let followup = DbSyncExec(sql:, with: params)
           logging.log(logging.Info, "Sending " <> int.to_string(list.length(entries)) <> " pipe entries")
           send_to_remote(who, followup)
-          Nil
+          Ok(Nil)
         }
 
-        _ -> Nil
+        _ -> Ok(Nil)
       }
     }
 
-    DbSyncExec(sql, with) -> {
+    Ok(DbSyncExec(sql, with)) -> {
       logging.log(logging.Info, "Received SQL from peer")
       case pturso.query(sql, on: db, with:, expecting: decode.success(Nil)) {
-        Ok(_) -> Nil
+        Ok(_) -> Ok(Nil)
         Error(err) -> {
           logging.log(logging.Error, "Bad SQL over sync? " <> string.inspect(err) <> " -- " <> sql)
+          Ok(Nil)
         }
       }
     }
+
+    Error(nil) -> Error(nil)
   }
+}
+
+pub fn db_receive_loop(db: pturso.Connection) {
+  let _ = db_receive_loop_iter(db, wait_for: 1000 * 60 * 60)
 
   hot_db_receive_loop(db)
 }

@@ -1,3 +1,6 @@
+import gleam/json
+import gleam/dynamic/decode
+import gleam/erlang/atom
 import migrations
 import gleam/string_tree
 import gleam/option.{Some}
@@ -32,6 +35,7 @@ pub fn curl_test() {
     master: master.data,
     ulid_to_string: gulid.to_string_function(),
     db:,
+    peers: [],
   )
 
   // Start listening
@@ -76,6 +80,7 @@ pub fn sse_test() {
     master: master.data,
     ulid_to_string: gulid.to_string_function(),
     db:,
+    peers: [],
   )
 
   let subj = process.new_subject()
@@ -117,6 +122,96 @@ pub fn sse_test() {
   should.be_none(body_event.name)
   let received_body = body_event.data |> string_tree.to_string
   assert string.contains(does: received_body, contain: "Message here")
+}
+
+pub fn peer_test() {
+  let assert Ok(master1) = pipemaster.new()
+  let assert Ok(master2) = pipemaster.new()
+  let db1 = turso_connection()
+  let db2 = turso_connection()
+
+  let peer1 = neohook.Peer(
+    node: neohook.my_erlang_node_id(),
+    pipe_entry_name: atom.create("pe1"),
+    db_sync_name: atom.create("dbs1"),
+  )
+
+  let peer2 = neohook.Peer(
+    node: neohook.my_erlang_node_id(),
+    pipe_entry_name: atom.create("pe2"),
+    db_sync_name: atom.create("dbs2"),
+  )
+
+  let state1 = neohook.AppState(
+    master: master1.data,
+    ulid_to_string: gulid.to_string_function(),
+    db: db1,
+    peers: [peer2],
+  )
+
+  let state2 = neohook.AppState(
+    master: master2.data,
+    ulid_to_string: gulid.to_string_function(),
+    db: db2,
+    peers: [peer1],
+  )
+
+  // neohook.register(peer1.db_sync_name, process.self())
+  neohook.register(peer2.db_sync_name, process.self())
+
+  // Send something with state1
+  let req = request.new()
+    |> request.set_method(http.Post)
+    |> request.set_path("/test/1")
+    |> request.set_header("user-agent", "curl/8.0.0")
+    |> request.set_header("x-test-header", "HITHERE")
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Sent to 1"), on_sse: no_sse))
+
+  let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state1)
+  should.equal(status, 200)
+
+  // It should appear in its own DB
+  let req = request.new()
+    |> request.set_method(http.Get)
+    |> request.set_path("/api/pipe_entries")
+    |> request.set_query([#("pipe", "test/1")])
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse))
+
+  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state1)
+  should.equal(status, 200)
+
+  let assert mist.Bytes(body) = body
+  let decoder = {
+    use id <- decode.field("id", decode.string)
+    use body <- decode.field("body", decode.bit_array)
+    decode.success(#(id, body))
+  } |> decode.list
+  let assert Ok([#(id_in_state1, body)]) = json.parse_bits(bytes_tree.to_bit_array(body), decoder)
+
+  should.equal(body, bit_array.from_string("Sent to 1"))
+
+  // It should appear in state2's DB too
+  let assert Ok(Nil) = neohook.db_receive_loop_iter(db2, wait_for: 3000)
+
+  let req = request.new()
+    |> request.set_method(http.Get)
+    |> request.set_path("/api/pipe_entries")
+    |> request.set_query([#("pipe", "test/1")])
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse))
+
+  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state2)
+  should.equal(status, 200)
+
+  let assert mist.Bytes(body) = body
+  let decoder = {
+    use id <- decode.field("id", decode.string)
+    use body <- decode.field("body", decode.bit_array)
+    decode.success(#(id, body))
+  } |> decode.list
+  let assert Ok([#(id_in_state2, body)]) = json.parse_bits(bytes_tree.to_bit_array(body), decoder)
+
+  should.equal(body, bit_array.from_string("Sent to 1"))
+  should.equal(id_in_state2, id_in_state1)
 }
 
 ///////////////////////
