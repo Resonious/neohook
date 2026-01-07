@@ -184,9 +184,9 @@ fn globally_configured_erlang_peers() -> List(Peer) {
   |> option.map(string.split(_, ","))
   |> option.lazy_unwrap(fn() { [] })
   |> list.map(atom.create)
-  |> list.map(fn(node) {
-    Peer(
-      node:,
+  |> list.map(fn(address) {
+    RemotePeer(
+      address:,
       pipe_entry_name: pipe_entry_receiver_name(),
       db_sync_name: db_sync_receiver_name(),
     )
@@ -194,12 +194,38 @@ fn globally_configured_erlang_peers() -> List(Peer) {
 }
 
 pub fn my_erlang_node_id() -> Atom {
-  let ip = env.get("ERLANG_NODE_IP") |> option.unwrap("localhost")
+  let ip = env.get("ERLANG_NODE_IP") |> option.unwrap("127.0.0.1")
   atom.create("neohook@" <> ip)
 }
 
 @external(erlang, "erlang", "send")
 fn send_to_remote(destination: #(Atom, Atom), message: a) -> a
+
+fn peer_send_pipe_entry(peer: Peer, message: pipemaster.Message) {
+  case peer {
+    RemotePeer(address:, pipe_entry_name:, ..) -> {
+      send_to_remote(#(pipe_entry_name, address), message)
+      Nil
+    }
+
+    LocalPeer(pipe_entry_subj:, ..) -> {
+      process.send(pipe_entry_subj, message)
+    }
+  }
+}
+
+fn peer_send_db_sync(peer: Peer, message: DbSyncMessage) {
+  case peer {
+    RemotePeer(address:, db_sync_name:, ..) -> {
+      send_to_remote(#(db_sync_name, address), message)
+      Nil
+    }
+
+    LocalPeer(db_sync_subj:, ..) -> {
+      process.send(db_sync_subj, message)
+    }
+  }
+}
 
 fn parrot_to_pturso(p: dev.Param) -> pturso.Param {
   case p {
@@ -219,11 +245,23 @@ fn parrot_to_pturso(p: dev.Param) -> pturso.Param {
 }
 
 pub type Peer {
-  Peer(
-    node: Atom,
+  LocalPeer(
+    name: String,
+    pipe_entry_subj: pipemaster.Subject,
+    db_sync_subj: process.Subject(DbSyncMessage),
+  )
+  RemotePeer(
+    address: Atom,
     pipe_entry_name: Atom,
     db_sync_name: Atom,
   )
+}
+
+pub fn peer_node(peer: Peer) {
+  case peer {
+    LocalPeer(name:, ..) -> name
+    RemotePeer(address:, ..) -> atom.to_string(address)
+  }
 }
 
 fn send_to_pipe(
@@ -251,11 +289,9 @@ fn send_to_pipe(
       |> json.object
       |> json.to_string
 
-      let node = my_erlang_node_id() |> atom.to_string
-
       let #(sql, with) = sql.insert_pipe_entry(
         id: message.entry.id,
-        node:,
+        node: peer_node(state.self),
         pipe: pipe_name,
         method: Some(message.entry.method |> http.method_to_string),
         headers: Some(headers_json),
@@ -271,7 +307,7 @@ fn send_to_pipe(
       // TODO dont do this as it interferes witb monotonic assumption diring routine sync
       let #(sql, params) = pipe_entry_bulk_insert([sql.PipeEntriesFromNodeSince(
         id: message.entry.id,
-        node:,
+        node: peer_node(state.self),
         pipe: pipe_name,
         method: Some(message.entry.method |> http.method_to_string),
         headers: Some(headers_json),
@@ -280,9 +316,9 @@ fn send_to_pipe(
       let sync_command = DbSyncExec(sql:, with: params)
 
       state.peers |> list.each(fn(peer) {
-        logging.log(logging.Info, "sending to " <> atom.to_string(peer.node))
-        send_to_remote(#(peer.pipe_entry_name, peer.node), message)
-        send_to_remote(#(peer.db_sync_name, peer.node), sync_command)
+        logging.log(logging.Info, "sending to " <> peer_node(peer))
+        peer_send_pipe_entry(peer, message)
+        peer_send_db_sync(peer, sync_command)
       })
 
       response.new(200)
@@ -368,6 +404,7 @@ pub type AppState {
     master: pipemaster.Subject,
     ulid_to_string: fn(Ulid) -> String,
     db: pturso.Connection,
+    self: Peer,
     peers: List(Peer),
   )
 }
@@ -583,9 +620,9 @@ pub fn forward_pipe_entries_forever(master: pipemaster.Pipemaster) {
   forward_pipe_entries_forever(master)
 }
 
-type DbSyncMessage {
+pub type DbSyncMessage {
   DbSyncHint(
-    who: #(Atom, Atom),
+    who: Peer,
     latest_pipe_entry_id: Result(BitArray, Nil),
   )
 
@@ -618,7 +655,7 @@ fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Peer) 
       #(
         peer_string,
         DbSyncHint(
-          who: #(me.db_sync_name, me.node),
+          who: me,
           latest_pipe_entry_id: dict.get(latest, peer_string),
         ),
       )
@@ -628,13 +665,13 @@ fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Peer) 
   peers |> list.each(fn(peer) {
     let peer_string = peer_to_string(peer)
     dict.get(all, peer_string) |> result.map(fn(message) {
-      send_to_remote(#(peer.db_sync_name, peer.node), message)
+      peer_send_db_sync(peer, message)
     })
   })
 }
 
 fn peer_to_string(peer: Peer) -> String {
-  atom.to_string(peer.node) <> atom.to_string(peer.pipe_entry_name) <> atom.to_string(peer.db_sync_name)
+  peer_node(peer)
 }
 
 fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(String, List(pturso.Param)) {
@@ -660,12 +697,9 @@ fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(Stri
   #(sql, params)
 }
 
-pub fn db_receive_loop_iter(db: pturso.Connection, wait_for wait_ms: Int) {
-  let selector = process.new_selector()
-    |> process.select_other(assume_db_sync_message)
-
-  case process.selector_receive(from: selector, within: wait_ms) {
-    Ok(DbSyncHint(who, latest_pipe_entry_id)) -> {
+pub fn db_receive_loop_iter(message: DbSyncMessage, db: pturso.Connection) {
+  case message {
+    DbSyncHint(who, latest_pipe_entry_id) -> {
       let me = my_erlang_node_id() |> atom.to_string
 
       let latest_pipe_entry_id = case latest_pipe_entry_id {
@@ -685,31 +719,46 @@ pub fn db_receive_loop_iter(db: pturso.Connection, wait_for wait_ms: Int) {
           let #(sql, params) = pipe_entry_bulk_insert(entries)
           let followup = DbSyncExec(sql:, with: params)
           logging.log(logging.Info, "Sending " <> int.to_string(list.length(entries)) <> " pipe entries")
-          send_to_remote(who, followup)
-          Ok(Nil)
+          peer_send_db_sync(who, followup)
         }
-
-        _ -> Ok(Nil)
+        [] -> Nil
       }
     }
 
-    Ok(DbSyncExec(sql, with)) -> {
+    DbSyncExec(sql, with) -> {
       logging.log(logging.Info, "Received SQL from peer")
       case pturso.query(sql, on: db, with:, expecting: decode.success(Nil)) {
-        Ok(_) -> Ok(Nil)
+        Ok(_) -> Nil
         Error(err) -> {
           logging.log(logging.Error, "Bad SQL over sync? " <> string.inspect(err) <> " -- " <> sql)
-          Ok(Nil)
         }
       }
     }
-
-    Error(nil) -> Error(nil)
   }
 }
 
-pub fn db_receive_loop(db: pturso.Connection) {
-  let _ = db_receive_loop_iter(db, wait_for: 1000 * 60 * 60)
+pub fn peer_receive_db_sync_forever(peer: Peer) {
+  case peer {
+    LocalPeer(db_sync_subj:, ..) -> process.receive_forever(db_sync_subj)
+
+    RemotePeer(..) -> process.new_selector()
+      |> process.select_other(assume_db_sync_message)
+      |> process.selector_receive_forever
+  }
+}
+
+pub fn peer_receive_db_sync(peer: Peer, within within: Int) {
+  case peer {
+    LocalPeer(db_sync_subj:, ..) -> process.receive(db_sync_subj, within:)
+
+    RemotePeer(..) -> process.new_selector()
+      |> process.select_other(assume_db_sync_message)
+      |> process.selector_receive(within:)
+  }
+}
+
+pub fn db_receive_loop(peer: Peer, db: pturso.Connection) {
+  peer_receive_db_sync_forever(peer) |> db_receive_loop_iter(db)
 
   hot_db_receive_loop(db)
 }
@@ -748,10 +797,17 @@ pub fn main() {
 
   let assert Ok(master) = pipemaster.new()
 
+  let me = RemotePeer(
+    address: my_erlang_node_id(),
+    pipe_entry_name: pipe_entry_receiver_name(),
+    db_sync_name: db_sync_receiver_name(),
+  )
+
   let state = AppState(
     master: master.data,
     ulid_to_string: gulid.to_string_function(),
     db:,
+    self: me,
     peers: globally_configured_erlang_peers(),
   )
 
@@ -761,12 +817,6 @@ pub fn main() {
   }
   |> uri.parse
 
-  let me = Peer(
-    node: my_erlang_node_id(),
-    pipe_entry_name: pipe_entry_receiver_name(),
-    db_sync_name: db_sync_receiver_name(),
-  )
-
   process.spawn(fn() {
     register(me.pipe_entry_name, process.self())
     forward_pipe_entries_forever(master)
@@ -774,7 +824,7 @@ pub fn main() {
 
   process.spawn(fn() {
     register(me.db_sync_name, process.self())
-    db_receive_loop(db)
+    db_receive_loop(me, db)
   })
 
   process.spawn(fn() {

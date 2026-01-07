@@ -1,6 +1,8 @@
+import gleam/function
+import gleam/list
+import gleam/result
 import gleam/json
 import gleam/dynamic/decode
-import gleam/erlang/atom
 import migrations
 import gleam/string_tree
 import gleam/option.{Some}
@@ -35,6 +37,7 @@ pub fn curl_test() {
     master: master.data,
     ulid_to_string: gulid.to_string_function(),
     db:,
+    self: default_peer(),
     peers: [],
   )
 
@@ -73,6 +76,14 @@ pub fn curl_test() {
   assert string.contains(message, "Message here")
 }
 
+fn default_peer() {
+  neohook.LocalPeer(
+    name: "default",
+    pipe_entry_subj: process.new_subject(),
+    db_sync_subj: process.new_subject(),
+  )
+}
+
 pub fn sse_test() {
   let assert Ok(master) = pipemaster.new()
   let db = turso_connection()
@@ -80,6 +91,7 @@ pub fn sse_test() {
     master: master.data,
     ulid_to_string: gulid.to_string_function(),
     db:,
+    self: default_peer(),
     peers: [],
   )
 
@@ -130,22 +142,23 @@ pub fn peer_test() {
   let db1 = turso_connection()
   let db2 = turso_connection()
 
-  let peer1 = neohook.Peer(
-    node: neohook.my_erlang_node_id(),
-    pipe_entry_name: atom.create("pe1"),
-    db_sync_name: atom.create("dbs1"),
+  let peer1 = neohook.LocalPeer(
+    name: "peer1",
+    pipe_entry_subj: process.new_subject(),
+    db_sync_subj: process.new_subject(),
   )
 
-  let peer2 = neohook.Peer(
-    node: neohook.my_erlang_node_id(),
-    pipe_entry_name: atom.create("pe2"),
-    db_sync_name: atom.create("dbs2"),
+  let peer2 = neohook.LocalPeer(
+    name: "peer2",
+    pipe_entry_subj: process.new_subject(),
+    db_sync_subj: process.new_subject(),
   )
 
   let state1 = neohook.AppState(
     master: master1.data,
     ulid_to_string: gulid.to_string_function(),
     db: db1,
+    self: peer1,
     peers: [peer2],
   )
 
@@ -153,11 +166,9 @@ pub fn peer_test() {
     master: master2.data,
     ulid_to_string: gulid.to_string_function(),
     db: db2,
+    self: peer2,
     peers: [peer1],
   )
-
-  // neohook.register(peer1.db_sync_name, process.self())
-  neohook.register(peer2.db_sync_name, process.self())
 
   // Send something with state1
   let req = request.new()
@@ -191,7 +202,10 @@ pub fn peer_test() {
   should.equal(body, bit_array.from_string("Sent to 1"))
 
   // It should appear in state2's DB too
-  let assert Ok(Nil) = neohook.db_receive_loop_iter(db2, wait_for: 3000)
+  process_db_syncs(peer2, db2) |> should.not_equal(0)
+  process_db_syncs(peer1, db1)
+  process_db_syncs(peer2, db2)
+  process_db_syncs(peer1, db1)
 
   let req = request.new()
     |> request.set_method(http.Get)
@@ -233,3 +247,12 @@ fn no_sse(_event: http_wrapper.SSEEvent) -> Result(Nil, Nil) {
 
 @external(erlang, "fs", "delete_files_matching")
 fn delete_files_matching(pattern: String) -> Nil
+
+fn process_db_syncs(peer: neohook.Peer, db: pturso.Connection) -> Int {
+  yielder.repeatedly(fn() { neohook.peer_receive_db_sync(peer, within: 100) })
+    |> yielder.take_while(result.is_ok)
+    |> yielder.filter_map(function.identity)
+    |> yielder.map(neohook.db_receive_loop_iter(_, db))
+    |> yielder.to_list
+    |> list.length
+}
