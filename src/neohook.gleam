@@ -632,7 +632,7 @@ pub type DbSyncMessage {
   )
 }
 
-fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Peer) {
+pub fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Peer) {
   let #(sql, with, expecting) = sql.latest_pipe_entries()
   let with = with |> list.map(parrot_to_pturso)
 

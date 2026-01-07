@@ -228,6 +228,93 @@ pub fn peer_test() {
   should.equal(id_in_state2, id_in_state1)
 }
 
+// This tests a case where given the naive implementation of sending pipe entries
+// to each peer every single time can result in some peers missing old entries.
+// Specifically, this happens when one peer is down then comes back up, then a
+// new entry gets inserted before tell_nodes_where_were_at gets run.
+pub fn peer_bug_test() {
+  let assert Ok(master1) = pipemaster.new()
+  let assert Ok(master2) = pipemaster.new()
+  let db1 = turso_connection()
+  let db2 = turso_connection()
+
+  let peer1 = neohook.LocalPeer(
+    name: "peer1",
+    pipe_entry_subj: process.new_subject(),
+    db_sync_subj: process.new_subject(),
+  )
+
+  let peer2 = neohook.LocalPeer(
+    name: "peer2",
+    pipe_entry_subj: process.new_subject(),
+    db_sync_subj: process.new_subject(),
+  )
+
+  let state1 = neohook.AppState(
+    master: master1.data,
+    ulid_to_string: gulid.to_string_function(),
+    db: db1,
+    self: peer1,
+    peers: [peer2],
+  )
+
+  let state2 = neohook.AppState(
+    master: master2.data,
+    ulid_to_string: gulid.to_string_function(),
+    db: db2,
+    self: peer2,
+    peers: [peer1],
+  )
+
+  // Send something with peer1
+  let req = request.new()
+    |> request.set_method(http.Post)
+    |> request.set_path("/test/1")
+    |> request.set_header("user-agent", "curl/8.0.0")
+    |> request.set_header("x-test-header", "HITHERE")
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Sent to 1"), on_sse: no_sse))
+  let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state1)
+  should.equal(status, 200)
+
+  // Suppose peer2 is down
+  drop_db_syncs(peer2, db2) |> should.not_equal(0)
+
+  // Send something else with peer1
+  let req = request.new()
+    |> request.set_method(http.Post)
+    |> request.set_path("/test/1")
+    |> request.set_header("user-agent", "curl/8.0.0")
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("new one"), on_sse: no_sse))
+  let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state1)
+  should.equal(status, 200)
+
+  // Bring peer2 back up
+  process_db_syncs(peer2, db2)
+  neohook.tell_nodes_where_were_at(db2, state2.peers, state2.self)
+  process_db_syncs(peer1, db1)
+  process_db_syncs(peer2, db2)
+
+  // Ensure that peer2 has both entries
+  let req = request.new()
+    |> request.set_method(http.Get)
+    |> request.set_path("/api/pipe_entries")
+    |> request.set_query([#("pipe", "test/1")])
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse))
+
+  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state2)
+  should.equal(status, 200)
+
+  let assert mist.Bytes(body) = body
+  let decoder = {
+    use body <- decode.field("body", decode.bit_array)
+    decode.success(body)
+  } |> decode.list
+  let assert Ok([body2, body1]) = json.parse_bits(bytes_tree.to_bit_array(body), decoder)
+
+  should.equal(body1, bit_array.from_string("Sent to 1"))
+  should.equal(body2, bit_array.from_string("new one"))
+}
+
 ///////////////////////
 // Utility functions //
 ///////////////////////
@@ -253,6 +340,14 @@ fn process_db_syncs(peer: neohook.Peer, db: pturso.Connection) -> Int {
     |> yielder.take_while(result.is_ok)
     |> yielder.filter_map(function.identity)
     |> yielder.map(neohook.db_receive_loop_iter(_, db))
+    |> yielder.to_list
+    |> list.length
+}
+
+fn drop_db_syncs(peer: neohook.Peer, db: pturso.Connection) -> Int {
+  yielder.repeatedly(fn() { neohook.peer_receive_db_sync(peer, within: 100) })
+    |> yielder.take_while(result.is_ok)
+    |> yielder.filter_map(function.identity)
     |> yielder.to_list
     |> list.length
 }
