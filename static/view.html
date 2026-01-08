@@ -291,11 +291,11 @@
       }
 
       async function fetchEntries() {
-        const response = await fetch(url("/api/pipe_entries", { pipe: SND.pipeName }));
-        const body = await response.json();
-        body.reverse();
+        const response = await fetch(url("/api/pipe", { name: SND.pipeName }));
+        const { entries } = await response.json();
+        entries.reverse();
 
-        for (const entry of body) {
+        for (const entry of entries) {
           console.log(entry);
           const headers = SND.renderHeaders(entry.headers, entry.timestamp);
           SND.addReceived("fetched", headers);

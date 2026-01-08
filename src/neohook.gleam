@@ -411,12 +411,12 @@ pub fn http_handler_for_mist(req: request.Request(mist.Connection), state: AppSt
 
 fn api_handler(api_path: List(String), req: Request, state: AppState) -> Response {
   case api_path {
-    ["pipe_entries"] -> {
+    ["pipe"] -> {
       let pipe = req.query
         |> option.unwrap("")
         |> uri.parse_query
         |> result.unwrap([])
-        |> list.key_find("pipe")
+        |> list.key_find("name")
 
       use <- lazy_guard(when: result.is_error(pipe), return: bad_request(because: "missing `?pipe=...`"))
       let assert Ok(pipe) = pipe
@@ -431,7 +431,7 @@ fn api_handler(api_path: List(String), req: Request, state: AppState) -> Respons
         }
       }
 
-      let entries_json = pturso.query(sql, on: state.db, with:, expecting:)
+      let entries = pturso.query(sql, on: state.db, with:, expecting:)
         |> result.unwrap([])
         |> json.array(fn(e) {
           let id = e.id |> gulid.from_bitarray |> result.lazy_unwrap(gulid.new)
@@ -455,11 +455,15 @@ fn api_handler(api_path: List(String), req: Request, state: AppState) -> Respons
             ))
           ])
         })
-        |> json.to_string_tree
+
+      let payload = json.object([
+        #("entries", entries)
+      ])
+      |> json.to_string_tree
 
       response.new(200)
       |> response.set_header("content-type", "application/json")
-      |> response.set_body(mist.Bytes(bytes_tree.from_string_tree(entries_json)))
+      |> response.set_body(mist.Bytes(bytes_tree.from_string_tree(payload)))
     }
 
     _ -> {
