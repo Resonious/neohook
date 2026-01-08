@@ -409,7 +409,7 @@ pub fn http_handler_for_mist(req: request.Request(mist.Connection), state: AppSt
   http_handler(req, state)
 }
 
-fn api_handler(api_path: List(String), req: Request, state: AppState) -> Response {
+fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response {
   case api_path {
     ["pipe"] -> {
       let pipe = req.query
@@ -491,7 +491,7 @@ pub fn http_handler(req: Request, state: AppState) -> Response {
     ["favicon.png"] -> serve_static("static/favicon.png", "image/png")
     ["favicon.svg"] -> serve_static("static/favicon.svg", "image/svg+xml")
 
-    ["api", ..rest] -> api_handler(rest, req, state)
+    ["api", ..rest] -> serve_api(rest, req, state)
 
     parts -> {
       let pipe_name = compute_pipe_name(parts)
