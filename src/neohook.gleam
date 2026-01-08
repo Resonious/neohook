@@ -409,24 +409,9 @@ pub fn http_handler_for_mist(req: request.Request(mist.Connection), state: AppSt
   http_handler(req, state)
 }
 
-pub fn http_handler(req: Request, state: AppState) -> Response {
-  use <- log_request(req)
-
-  // It seems the "//" path results in an empty string path
-  use <- lazy_guard(when: req.path == "", return: redirect(to: "/"))
-
-  // Remove repeated slashes from paths
-  let scrubbed_path = remove_repeat_slashes(from: req.path)
-  use <- lazy_guard(when: req.path != scrubbed_path, return: redirect(to: scrubbed_path))
-
-  // routing
-  case request.path_segments(req) {
-    // TODO: "/" needs to look better on curl!!
-    [] -> serve_html("static/landing.html", status: 200)
-    ["favicon.png"] -> serve_static("static/favicon.png", "image/png")
-    ["favicon.svg"] -> serve_static("static/favicon.svg", "image/svg+xml")
-
-    ["api", "pipe_entries"] -> {
+fn api_handler(api_path: List(String), req: Request, state: AppState) -> Response {
+  case api_path {
+    ["pipe_entries"] -> {
       let pipe = req.query
         |> option.unwrap("")
         |> uri.parse_query
@@ -476,6 +461,33 @@ pub fn http_handler(req: Request, state: AppState) -> Response {
       |> response.set_header("content-type", "application/json")
       |> response.set_body(mist.Bytes(bytes_tree.from_string_tree(entries_json)))
     }
+
+    _ -> {
+      response.new(404)
+      |> response.set_header("content-type", "application/json")
+      |> response.set_body(mist.Bytes(bytes_tree.from_string("{\"error\":\"path not found\"}")))
+    }
+  }
+}
+
+pub fn http_handler(req: Request, state: AppState) -> Response {
+  use <- log_request(req)
+
+  // It seems the "//" path results in an empty string path
+  use <- lazy_guard(when: req.path == "", return: redirect(to: "/"))
+
+  // Remove repeated slashes from paths
+  let scrubbed_path = remove_repeat_slashes(from: req.path)
+  use <- lazy_guard(when: req.path != scrubbed_path, return: redirect(to: scrubbed_path))
+
+  // routing
+  case request.path_segments(req) {
+    // TODO: "/" needs to look better on curl!!
+    [] -> serve_html("static/landing.html", status: 200)
+    ["favicon.png"] -> serve_static("static/favicon.png", "image/png")
+    ["favicon.svg"] -> serve_static("static/favicon.svg", "image/svg+xml")
+
+    ["api", ..rest] -> api_handler(rest, req, state)
 
     parts -> {
       let pipe_name = compute_pipe_name(parts)
