@@ -51,13 +51,13 @@
         fill: var(--color-text);
       }
 
-      #received {
+      .entry {
         display: flex;
         flex-direction: column;
         align-items: start;
       }
 
-      #received pre {
+      .entry pre {
         padding: 1em;
         margin: 0;
 
@@ -66,7 +66,7 @@
         transform: translateX(999px);
       }
 
-      #received pre:nth-child(odd) {
+      .entry pre:nth-child(odd) {
         margin-top: 2em;
 
         border-bottom-left-radius: 0;
@@ -78,13 +78,33 @@
         transition: transform 0.5s;
       }
 
-      #received pre:nth-child(even) {
+      .entry pre:nth-child(even) {
         border-top-left-radius: 0;
         border-top-right-radius: 0;
 
         border: 1px solid var(--color-border);
 
         transition: opacity 0.5s;
+      }
+
+      #inbetween {
+        display: none;
+        margin-top: 28px;
+        margin-bottom: 16px;
+      }
+
+      #inbetween fieldset {
+        padding-left: 10px;
+      }
+
+      #inbetween .live {
+        color: red;
+        border: 1px solid red;
+      }
+
+      #inbetween .previous {
+        color: var(--color-border);
+        border: 1px solid var(--color-border);
       }
 
       .code {
@@ -172,7 +192,18 @@
       <div class="code" id="post"></div>
     </div>
 
-    <div id="received"></div>
+    <div class="entry" id="received"></div>
+    <div id="inbetween">
+      <fieldset class="live">
+        <legend>⭡ live ⭡</legend>
+      </fieldset>
+      <fieldset class="previous">
+        <legend>⭣ previous ⭣</legend>
+      </fieldset>
+    </div>
+    <div class="entry" id="fetched"></div>
+
+    <script>window.SND = {}</script>
 
     <script type="module">
       const get = document.getElementById("get");
@@ -181,16 +212,16 @@
       const url = new URL(location.href);
 
       // Get path or generate random one if on root
-      let pathPart = url.pathname.slice(1);
-      if (!pathPart) {
-        pathPart = crypto
+      let pipeName = url.pathname.slice(1);
+      if (!pipeName) {
+        pipeName = crypto
           .getRandomValues(new Uint32Array(1))[0]
           .toString(16);
       }
 
       const appendPath = (el) => {
         const span = document.createElement("span");
-        span.textContent = pathPart;
+        span.textContent = pipeName;
         span.classList.add("highlight");
         el.append(span);
       };
@@ -203,16 +234,17 @@
         post.textContent = `curl -d 'Hello, world!' ${url.origin}/`;
         appendPath(post);
       }
-      url.pathname = pathPart;
+      url.pathname = pipeName;
+      SND.pipeName = pipeName;
 
       {
-        const received = document.getElementById("received");
         const evt = new EventSource(url);
 
-        const addReceived = (text) => {
+        SND.addReceived = (root, text) => {
+          const container = document.getElementById(root);
           const el = document.createElement("pre");
           el.textContent = text;
-          received.prepend(el);
+          container.prepend(el);
 
           setTimeout(() => {
             el.style.transform = "translateX(0)";
@@ -220,23 +252,58 @@
           }, 1);
         };
 
-        evt.addEventListener("headers", (e) => {
-          const headers = JSON.parse(e.data);
-          let text = `${new Date().toLocaleString()}\n`;
+        SND.renderHeaders = (headers, timestamp) => {
+          let text = `${new Date(timestamp).toLocaleString()}\n`;
           for (const name in headers) {
             text += name + ": " + headers[name] + "\n";
           }
-          addReceived(text);
+          return text;
+        };
+
+        evt.addEventListener("headers", (e) => {
+          const headers = JSON.parse(e.data);
+          const text = SND.renderHeaders(headers, new Date().getTime())
+          SND.addReceived("received", text);
         });
 
         evt.addEventListener("message", (e) => {
           const message = e.data;
-          addReceived(message);
+
+          if (document.getElementById("fetched").children.length > 0) {
+            document.getElementById("inbetween").style.display = "block";
+          }
+
+          SND.addReceived("received", message);
         });
       }
     </script>
 
     <script type="module">
+      function url(path, params) {
+        const url = new URL(location.href);
+        const search = new URLSearchParams();
+        url.pathname = path;
+        for (const p in params) {
+          search.append(p, params[p]);
+        }
+        url.search = search.toString();
+        return url;
+      }
+
+      async function fetchEntries() {
+        const response = await fetch(url("/api/pipe_entries", { pipe: SND.pipeName }));
+        const body = await response.json();
+        body.reverse();
+
+        for (const entry of body) {
+          console.log(entry);
+          const headers = SND.renderHeaders(entry.headers, entry.timestamp);
+          SND.addReceived("fetched", headers);
+          SND.addReceived("fetched", entry.body);
+        }
+      }
+
+      fetchEntries();
     </script>
   </body>
 </html>
