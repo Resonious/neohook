@@ -418,7 +418,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         |> result.unwrap([])
         |> list.key_find("name")
 
-      use <- lazy_guard(when: result.is_error(pipe), return: bad_request(because: "missing `?pipe=...`"))
+      use <- lazy_guard(when: result.is_error(pipe), return: bad_request(because: "missing `?name=...`"))
       let assert Ok(pipe) = pipe
 
       let #(sql, with, expecting) = sql.pipe_entries_by_pipe(pipe:, limit: 10, offset: 0)

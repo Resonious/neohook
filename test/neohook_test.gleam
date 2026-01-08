@@ -182,22 +182,7 @@ pub fn peer_test() {
   should.equal(status, 200)
 
   // It should appear in its own DB
-  let req = request.new()
-    |> request.set_method(http.Get)
-    |> request.set_path("/api/pipe_entries")
-    |> request.set_query([#("pipe", "test/1")])
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse))
-
-  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state1)
-  should.equal(status, 200)
-
-  let assert mist.Bytes(body) = body
-  let decoder = {
-    use id <- decode.field("id", decode.string)
-    use body <- decode.field("body", decode.bit_array)
-    decode.success(#(id, body))
-  } |> decode.list
-  let assert Ok([#(id_in_state1, body)]) = json.parse_bits(bytes_tree.to_bit_array(body), decoder)
+  let assert [Entry(id: id_in_state1, body:)] = fetch_entries(for: "test/1", from: state1)
 
   should.equal(body, bit_array.from_string("Sent to 1"))
 
@@ -207,22 +192,7 @@ pub fn peer_test() {
   process_db_syncs(peer2, db2)
   process_db_syncs(peer1, db1)
 
-  let req = request.new()
-    |> request.set_method(http.Get)
-    |> request.set_path("/api/pipe_entries")
-    |> request.set_query([#("pipe", "test/1")])
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse))
-
-  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state2)
-  should.equal(status, 200)
-
-  let assert mist.Bytes(body) = body
-  let decoder = {
-    use id <- decode.field("id", decode.string)
-    use body <- decode.field("body", decode.bit_array)
-    decode.success(#(id, body))
-  } |> decode.list
-  let assert Ok([#(id_in_state2, body)]) = json.parse_bits(bytes_tree.to_bit_array(body), decoder)
+  let assert [Entry(id: id_in_state2, body:)] = fetch_entries(for: "test/1", from: state2)
 
   should.equal(body, bit_array.from_string("Sent to 1"))
   should.equal(id_in_state2, id_in_state1)
@@ -295,21 +265,8 @@ pub fn peer_bug_test() {
   process_db_syncs(peer2, db2)
 
   // Ensure that peer2 has both entries
-  let req = request.new()
-    |> request.set_method(http.Get)
-    |> request.set_path("/api/pipe_entries")
-    |> request.set_query([#("pipe", "test/1")])
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse))
-
-  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state2)
-  should.equal(status, 200)
-
-  let assert mist.Bytes(body) = body
-  let decoder = {
-    use body <- decode.field("body", decode.bit_array)
-    decode.success(body)
-  } |> decode.list
-  let assert Ok([body2, body1]) = json.parse_bits(bytes_tree.to_bit_array(body), decoder)
+  let entries = fetch_entries(for: "test/1", from: state2)
+  let assert [Entry(body: body2, ..), Entry(body: body1, ..)] = entries
 
   should.equal(body1, bit_array.from_string("Sent to 1"))
   should.equal(body2, bit_array.from_string("new one"))
@@ -318,6 +275,36 @@ pub fn peer_bug_test() {
 ///////////////////////
 // Utility functions //
 ///////////////////////
+
+type Entry {
+  Entry(id: String, body: BitArray)
+}
+
+fn fetch_entries(from state: neohook.AppState, for pipe: String) -> List(Entry) {
+  let req = request.new()
+    |> request.set_method(http.Get)
+    |> request.set_path("/api/pipe")
+    |> request.set_query([#("name", pipe)])
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse))
+
+  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state)
+  should.equal(status, 200)
+
+  let assert mist.Bytes(body) = body
+  let entries_decoder = {
+    use id <- decode.field("id", decode.string)
+    use body <- decode.field("body", decode.bit_array)
+    decode.success(Entry(id:, body:))
+  } |> decode.list
+
+  let decoder = {
+    use entries <- decode.field("entries", entries_decoder)
+    decode.success(entries)
+  }
+
+  let assert Ok(result) = json.parse_bits(bytes_tree.to_bit_array(body), decoder)
+  result
+}
 
 fn turso_connection() -> pturso.Connection {
   let erso_path = env.get("ERSO") |> option.unwrap("/var/www/erso")
