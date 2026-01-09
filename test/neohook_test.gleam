@@ -136,6 +136,70 @@ pub fn sse_test() {
   assert string.contains(does: received_body, contain: "Message here")
 }
 
+pub fn persisted_test() {
+  let assert Ok(master) = pipemaster.new()
+  let db = turso_connection()
+  let state = neohook.AppState(
+    master: master.data,
+    ulid_to_string: gulid.to_string_function(),
+    db:,
+    self: default_peer(),
+    peers: [],
+  )
+
+  // Send something
+  let req = request.new()
+    |> request.set_method(http.Post)
+    |> request.set_path("/test/1")
+    |> request.set_header("user-agent", "curl/8.0.0")
+    |> request.set_header("x-test-header", "HITHERE")
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("First"), on_sse: no_sse))
+
+  let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state)
+
+  // It should *not* be saved to the DB
+  let assert [] = fetch_entries(for: "test/1", from: state)
+
+  update_flags(
+    state,
+    "test/1",
+    persisted: True,
+  )
+
+  // Send something else
+  let req = request.new()
+    |> request.set_method(http.Post)
+    |> request.set_path("/test/1")
+    |> request.set_header("user-agent", "curl/8.0.0")
+    |> request.set_header("x-test-header", "HITHERE")
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Second"), on_sse: no_sse))
+
+  let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state)
+
+  // This one *should* be saved to the DB
+  let assert [Entry(body: <<"Second":utf8>>, ..)] = fetch_entries(for: "test/1", from: state)
+
+  // One more test to make sure disabling works:
+  update_flags(
+    state,
+    "test/1",
+    persisted: False,
+  )
+  let req = request.new()
+    |> request.set_method(http.Post)
+    |> request.set_path("/test/1")
+    |> request.set_header("user-agent", "curl/8.0.0")
+    |> request.set_header("x-test-header", "HITHERE")
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Third"), on_sse: no_sse))
+
+  let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state)
+
+  // Should still only be one saved entry
+  let assert [Entry(body: <<"Second":utf8>>, ..)] = fetch_entries(for: "test/1", from: state)
+
+  Nil
+}
+
 pub fn peer_test() {
   let assert Ok(master1) = pipemaster.new()
   let assert Ok(master2) = pipemaster.new()
@@ -168,6 +232,12 @@ pub fn peer_test() {
     db: db2,
     self: peer2,
     peers: [peer1],
+  )
+
+  update_flags(
+    state1,
+    "test/1",
+    persisted: True,
   )
 
   // Send something with state1
@@ -236,6 +306,12 @@ pub fn peer_bug_test() {
     peers: [peer1],
   )
 
+  update_flags(
+    state1,
+    "test/1",
+    persisted: True,
+  )
+
   // Send something with peer1
   let req = request.new()
     |> request.set_method(http.Post)
@@ -278,6 +354,27 @@ pub fn peer_bug_test() {
 
 type Entry {
   Entry(id: String, body: BitArray)
+}
+
+fn update_flags(
+  state: neohook.AppState,
+  pipe: String,
+  persisted persisted: Bool,
+) {
+  let req_body = json.object([
+    #("persisted", json.bool(persisted)),
+  ])
+    |> json.to_string
+    |> bit_array.from_string
+
+  let req = request.new()
+    |> request.set_method(http.Post)
+    |> request.set_path("/api/pipe/settings")
+    |> request.set_query([#("pipe", pipe)])
+    |> request.set_body(http_wrapper.SimpleBody(req_body, on_sse: no_sse))
+
+  let response.Response(status:, ..) = neohook.http_handler(req, state)
+  should.equal(status, 204)
 }
 
 fn fetch_entries(from state: neohook.AppState, for pipe: String) -> List(Entry) {

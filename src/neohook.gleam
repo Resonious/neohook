@@ -282,14 +282,17 @@ fn send_to_pipe(
         )
       )
 
+      // This sends the entry to all active listeners.
       process.send(state.master, message)
 
       let headers_json = message.entry.headers
-      |> list.map(fn(x) { #(x.0, json.string(x.1)) })
-      |> json.object
-      |> json.to_string
+        |> list.map(fn(x) { #(x.0, json.string(x.1)) })
+        |> json.object
+        |> json.to_string
 
-      let #(sql, with) = sql.insert_pipe_entry(
+      // The insert query checks the `persisted` flag inline, and
+      // returns col_0=1 when the insert actually happened.
+      let #(sql, with, expecting) = sql.insert_pipe_entry(
         id: message.entry.id,
         node: peer_node(state.self),
         pipe: pipe_name,
@@ -298,18 +301,26 @@ fn send_to_pipe(
         body: Some(message.entry.body),
       )
       let with = with |> list.map(parrot_to_pturso)
-      case pturso.query(sql, on: state.db, with:, expecting: decode.success(Nil)) {
+      case pturso.query(sql, on: state.db, with:, expecting:) {
+        // This means the pipe *was* marked as persisted, and the insert
+        // was successful, so we need to tell peers about the new data.
+        Ok([sql.InsertPipeEntry(col_0: 1)]) -> 
+          state.peers |> list.each(fn(peer) {
+            logging.log(logging.Info, "sending to " <> peer_node(peer))
+            peer_send_db_sync(peer, DbSyncNewEntry(who: state.self))
+          })
+
+        // Something went horribly wrong here
         Error(error) -> { echo error Nil }
+
+        // No insert was performed
         _ -> Nil
       }
 
-      // Update peers
-      let sync_command = DbSyncNewEntry(who: state.self)
-
+      // Always tell peers to forward the pipe entry to active listeners.
       state.peers |> list.each(fn(peer) {
         logging.log(logging.Info, "sending to " <> peer_node(peer))
         peer_send_pipe_entry(peer, message)
-        peer_send_db_sync(peer, sync_command)
       })
 
       response.new(200)
@@ -412,26 +423,29 @@ pub fn http_handler_for_mist(req: request.Request(mist.Connection), state: AppSt
 fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response {
   case api_path {
     ["pipe"] -> {
+      let pipe_key = "name"
       let pipe = req.query
         |> option.unwrap("")
         |> uri.parse_query
         |> result.unwrap([])
-        |> list.key_find("name")
+        |> list.key_find(pipe_key)
 
-      use <- lazy_guard(when: result.is_error(pipe), return: bad_request(because: "missing `?name=...`"))
+      use <- lazy_guard(when: result.is_error(pipe), return: bad_request(because: "missing `?"<>pipe_key<>"=...`"))
       let assert Ok(pipe) = pipe
 
-      let #(sql, with, expecting) = sql.pipe_entries_by_pipe(pipe:, limit: 10, offset: 0)
-      let with = with |> list.map(parrot_to_pturso)
+      let entries_subj = process.new_subject()
+      process.spawn(fn() {
+        let #(sql, with, expecting) = sql.pipe_entries_by_pipe(pipe:, limit: 10, offset: 0)
+        let with = with |> list.map(parrot_to_pturso)
 
-      let render_body = fn(body: BitArray) -> String {
-        case bit_array.to_string(body) {
-          Ok(x) -> x
-          Error(_) -> bit_array.base64_encode(body, True)
+        let render_body = fn(body: BitArray) -> String {
+          case bit_array.to_string(body) {
+            Ok(x) -> x
+            Error(_) -> bit_array.base64_encode(body, True)
+          }
         }
-      }
 
-      let entries = pturso.query(sql, on: state.db, with:, expecting:)
+        pturso.query(sql, on: state.db, with:, expecting:)
         |> result.unwrap([])
         |> json.array(fn(e) {
           let id = e.id |> gulid.from_bitarray |> result.lazy_unwrap(gulid.new)
@@ -455,15 +469,98 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
             ))
           ])
         })
+        |> process.send(entries_subj, _)
+      })
+
+      let settings_subj = process.new_subject()
+      process.spawn(fn() {
+        let #(sql, with, expecting) = sql.latest_pipe_settings(pipe:)
+        let with = with |> list.map(parrot_to_pturso)
+
+        let value = pturso.query(sql, on: state.db, with:, expecting:)
+          |> result.unwrap([])
+          |> list.first
+
+        let flags = value
+          |> result.map(fn(x) { x.flags |> option.unwrap(<<>>) })
+          |> result.map(pipe.parse_flags)
+          |> result.lazy_unwrap(pipe.default_flags)
+
+        process.send(settings_subj, pipe.flags_to_json(flags))
+      })
+
+      let entries = process.receive(entries_subj, within: 1000)
+        |> result.lazy_unwrap(fn() { json.array([], of: fn(_) { json.null() }) })
+      let settings = process.receive(settings_subj, within: 1000)
+        |> result.unwrap(json.null())
 
       let payload = json.object([
-        #("entries", entries)
+        #("entries", entries),
+        #("settings", settings),
       ])
       |> json.to_string_tree
 
       response.new(200)
       |> response.set_header("content-type", "application/json")
       |> response.set_body(mist.Bytes(bytes_tree.from_string_tree(payload)))
+    }
+
+    ["pipe", "settings"] -> {
+      let pipe_key = "pipe"
+      let pipe = req.query
+        |> option.unwrap("")
+        |> uri.parse_query
+        |> result.unwrap([])
+        |> list.key_find(pipe_key)
+
+      use <- lazy_guard(when: result.is_error(pipe), return: bad_request(because: "missing `?"<>pipe_key<>"=...`"))
+      let assert Ok(pipe) = pipe
+
+      let body = http_wrapper.read_body(req, 1024 * 8)
+      use <- lazy_guard(when: result.is_error(body), return: bad_request(because: "body too big"))
+      let assert Ok(request.Request(body:, ..)) = body
+
+      let new_flags = json.parse_bits(body, pipe.flags_update_decoder())
+      use <- lazy_guard(when: result.is_error(new_flags), return: bad_request(because: "missing fields"))
+      let assert Ok(new_flags) = new_flags
+
+      let #(sql, with, expecting) = sql.latest_pipe_settings(pipe:)
+      let with = with |> list.map(parrot_to_pturso)
+
+      let latest_settings = pturso.query(sql, on: state.db, with:, expecting:)
+        |> result.unwrap([])
+        |> list.first
+
+      let current_flags = latest_settings
+        |> result.map(fn(x) { x.flags |> option.unwrap(<<>>) })
+        |> result.map(pipe.parse_flags)
+        |> result.lazy_unwrap(pipe.default_flags)
+
+      let new_flags = pipe.Flags(
+        persisted: option.unwrap(new_flags.persisted, current_flags.persisted)
+      )
+
+      let id = gulid.new() |> gulid.to_bitarray
+
+      let #(sql, with) = sql.insert_pipe_settings(
+        id:,
+        node: peer_node(state.self),
+        pipe:,
+        flags: Some(pipe.serialize_flags(new_flags)),
+      )
+      let with = with |> list.map(parrot_to_pturso)
+
+      case pturso.query(sql, on: state.db, with:, expecting: decode.success(Nil)) {
+        Ok(_) -> response.new(204)
+          |> response.set_header("content-type", "application/json")
+          |> response.set_body(mist.Bytes(bytes_tree.new()))
+        Error(e) -> {
+          echo e
+          response.new(500)
+          |> response.set_header("content-type", "application/json")
+          |> response.set_body(mist.Bytes(bytes_tree.from_string("database error")))
+        }
+      }
     }
 
     _ -> {
@@ -636,6 +733,7 @@ pub type DbSyncMessage {
   DbSyncHint(
     who: Peer,
     latest_pipe_entry_id: Result(BitArray, Nil),
+    // TODO: add settings to this
   )
 
   DbSyncExec(

@@ -5,6 +5,10 @@ import gleam/dynamic/decode
 import gleam/option.{type Option}
 import parrot/dev
 
+pub type InsertPipeEntry {
+  InsertPipeEntry(col_0: Int)
+}
+
 pub fn insert_pipe_entry(
   id id: BitArray,
   node node: String,
@@ -16,17 +20,33 @@ pub fn insert_pipe_entry(
   let sql =
     "INSERT INTO pipe_entries (
   id, node, pipe, method, headers, body
-) VALUES (
-  ?, ?, ?, ?, ?, ?
-)"
-  #(sql, [
-    dev.ParamBitArray(id),
-    dev.ParamString(node),
-    dev.ParamString(pipe),
-    dev.ParamNullable(option.map(method, fn(v) { dev.ParamString(v) })),
-    dev.ParamNullable(option.map(headers, fn(v) { dev.ParamString(v) })),
-    dev.ParamNullable(option.map(body, fn(v) { dev.ParamBitArray(v) })),
-  ])
+)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6
+WHERE (
+  SELECT (CAST(substr(pipe_settings.flags, 1, 1) AS INTEGER) >> 7) persisted
+  FROM pipe_settings 
+  WHERE pipe_settings.pipe = ?3
+  ORDER BY id DESC
+  LIMIT 1
+) = 1
+RETURNING 1"
+  #(
+    sql,
+    [
+      dev.ParamBitArray(id),
+      dev.ParamString(node),
+      dev.ParamString(pipe),
+      dev.ParamNullable(option.map(method, fn(v) { dev.ParamString(v) })),
+      dev.ParamNullable(option.map(headers, fn(v) { dev.ParamString(v) })),
+      dev.ParamNullable(option.map(body, fn(v) { dev.ParamBitArray(v) })),
+    ],
+    insert_pipe_entry_decoder(),
+  )
+}
+
+pub fn insert_pipe_entry_decoder() -> decode.Decoder(InsertPipeEntry) {
+  use col_0 <- decode.field(0, decode.int)
+  decode.success(InsertPipeEntry(col_0:))
 }
 
 pub type PipeEntriesByPipe {
@@ -124,4 +144,50 @@ pub fn latest_pipe_entries_decoder() -> decode.Decoder(LatestPipeEntries) {
   use node <- decode.field(0, decode.string)
   use latest_id <- decode.field(1, decode.optional(decode.dynamic))
   decode.success(LatestPipeEntries(node:, latest_id:))
+}
+
+pub fn insert_pipe_settings(
+  id id: BitArray,
+  node node: String,
+  pipe pipe: String,
+  flags flags: Option(BitArray),
+) {
+  let sql =
+    "INSERT INTO pipe_settings (
+  id, node, pipe, flags
+) VALUES (
+  ?, ?, ?, ?
+)"
+  #(sql, [
+    dev.ParamBitArray(id),
+    dev.ParamString(node),
+    dev.ParamString(pipe),
+    dev.ParamNullable(option.map(flags, fn(v) { dev.ParamBitArray(v) })),
+  ])
+}
+
+pub type LatestPipeSettings {
+  LatestPipeSettings(
+    id: BitArray,
+    node: String,
+    pipe: String,
+    flags: Option(BitArray),
+  )
+}
+
+pub fn latest_pipe_settings(pipe pipe: String) {
+  let sql =
+    "SELECT id, node, pipe, flags FROM pipe_settings
+WHERE pipe = ?
+ORDER BY id DESC
+LIMIT 1"
+  #(sql, [dev.ParamString(pipe)], latest_pipe_settings_decoder())
+}
+
+pub fn latest_pipe_settings_decoder() -> decode.Decoder(LatestPipeSettings) {
+  use id <- decode.field(0, decode.bit_array)
+  use node <- decode.field(1, decode.string)
+  use pipe <- decode.field(2, decode.string)
+  use flags <- decode.field(3, decode.optional(decode.bit_array))
+  decode.success(LatestPipeSettings(id:, node:, pipe:, flags:))
 }

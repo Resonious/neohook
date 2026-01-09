@@ -1,9 +1,16 @@
--- name: insert_pipe_entry :exec
+-- name: insert_pipe_entry :many
 INSERT INTO pipe_entries (
   id, node, pipe, method, headers, body
-) VALUES (
-  ?, ?, ?, ?, ?, ?
-);
+)
+SELECT :id, :node, :pipe, :method, :headers, :body
+WHERE (
+  SELECT (CAST(substr(pipe_settings.flags, 1, 1) AS INTEGER) >> 7) persisted
+  FROM pipe_settings 
+  WHERE pipe_settings.pipe = :pipe
+  ORDER BY id DESC
+  LIMIT 1
+) = 1
+RETURNING 1;
 
 -- name: pipe_entries_by_pipe :many
 SELECT id, method, headers, body

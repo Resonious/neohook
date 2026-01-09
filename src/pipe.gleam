@@ -1,3 +1,4 @@
+import gleam/option
 import neohook/http_wrapper
 import termcolor
 import gleam/bool.{guard}
@@ -33,6 +34,58 @@ pub type Kind {
   Sse(http_wrapper.SSEConnection)
 
   Dead
+}
+
+pub type Flags {
+  Flags(
+    persisted: Bool,
+  )
+}
+
+pub type FlagsUpdate {
+  FlagsUpdate(
+    persisted: option.Option(Bool),
+  )
+}
+
+pub fn flags_update_decoder() -> decode.Decoder(FlagsUpdate) {
+  use persisted <- decode.field("persisted", decode.optional(decode.bool))
+  decode.success(FlagsUpdate(persisted:))
+}
+
+pub fn flags_to_json(flags: Flags) -> json.Json {
+  json.object([
+    #("persisted", json.bool(flags.persisted))
+  ])
+}
+
+pub fn default_flags() -> Flags {
+  Flags(
+    persisted: False,
+  )
+}
+
+pub fn parse_flags(bits: BitArray) -> Flags {
+  case bits {
+    <<persisted:size(1), _>> -> Flags(
+      persisted: persisted == 1
+    )
+    _ -> default_flags()
+  }
+}
+
+pub fn serialize_flags(flags: Flags) -> BitArray {
+  let persisted = from_bool(flags.persisted)
+  let result = <<persisted:bits, 0:size(63)>>
+  assert bit_array.bit_size(result) == 64
+  result
+}
+
+fn from_bool(b: Bool) -> BitArray {
+  case b {
+    True -> <<1:size(1)>>
+    False -> <<0:size(1)>>
+  }
 }
 
 pub fn new(kind: Kind) {
