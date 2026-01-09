@@ -23,7 +23,7 @@ pub fn insert_pipe_entry(
 )
 SELECT ?1, ?2, ?3, ?4, ?5, ?6
 WHERE (
-  SELECT (CAST(substr(pipe_settings.flags, 1, 1) AS INTEGER) >> 7) persisted
+  SELECT (flags & 1) persisted
   FROM pipe_settings 
   WHERE pipe_settings.pipe = ?3
   ORDER BY id DESC
@@ -150,7 +150,7 @@ pub fn insert_pipe_settings(
   id id: BitArray,
   node node: String,
   pipe pipe: String,
-  flags flags: Option(BitArray),
+  flags flags: Int,
 ) {
   let sql =
     "INSERT INTO pipe_settings (
@@ -162,17 +162,12 @@ pub fn insert_pipe_settings(
     dev.ParamBitArray(id),
     dev.ParamString(node),
     dev.ParamString(pipe),
-    dev.ParamNullable(option.map(flags, fn(v) { dev.ParamBitArray(v) })),
+    dev.ParamInt(flags),
   ])
 }
 
 pub type LatestPipeSettings {
-  LatestPipeSettings(
-    id: BitArray,
-    node: String,
-    pipe: String,
-    flags: Option(BitArray),
-  )
+  LatestPipeSettings(id: BitArray, node: String, pipe: String, flags: Int)
 }
 
 pub fn latest_pipe_settings(pipe pipe: String) {
@@ -188,6 +183,6 @@ pub fn latest_pipe_settings_decoder() -> decode.Decoder(LatestPipeSettings) {
   use id <- decode.field(0, decode.bit_array)
   use node <- decode.field(1, decode.string)
   use pipe <- decode.field(2, decode.string)
-  use flags <- decode.field(3, decode.optional(decode.bit_array))
+  use flags <- decode.field(3, decode.int)
   decode.success(LatestPipeSettings(id:, node:, pipe:, flags:))
 }

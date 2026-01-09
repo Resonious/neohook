@@ -34,7 +34,7 @@ pub fn all_migrations() -> List(#(String, String)) {
         id BLOB PRIMARY KEY,
         node TEXT NOT NULL,
         pipe TEXT NOT NULL,
-        flags BLOB
+        flags INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE INDEX pipe_settings_pipe

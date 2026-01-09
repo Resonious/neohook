@@ -4,7 +4,7 @@ INSERT INTO pipe_entries (
 )
 SELECT :id, :node, :pipe, :method, :headers, :body
 WHERE (
-  SELECT (CAST(substr(pipe_settings.flags, 1, 1) AS INTEGER) >> 7) persisted
+  SELECT (flags & 1) persisted
   FROM pipe_settings 
   WHERE pipe_settings.pipe = :pipe
   ORDER BY id DESC

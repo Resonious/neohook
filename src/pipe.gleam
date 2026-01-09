@@ -1,3 +1,4 @@
+import gleam/int
 import gleam/option
 import neohook/http_wrapper
 import termcolor
@@ -65,27 +66,18 @@ pub fn default_flags() -> Flags {
   )
 }
 
-pub fn parse_flags(bits: BitArray) -> Flags {
-  case bits {
-    <<persisted:size(1), _>> -> Flags(
-      persisted: persisted == 1
-    )
-    _ -> default_flags()
-  }
+pub fn parse_flags(bits: Int) -> Flags {
+  Flags(
+    persisted: {int.bitwise_and(bits, 1) == 1},
+  )
 }
 
-pub fn serialize_flags(flags: Flags) -> BitArray {
-  let persisted = from_bool(flags.persisted)
-  let result = <<persisted:bits, 0:size(63)>>
-  assert bit_array.bit_size(result) == 64
-  result
-}
-
-fn from_bool(b: Bool) -> BitArray {
-  case b {
-    True -> <<1:size(1)>>
-    False -> <<0:size(1)>>
-  }
+pub fn serialize_flags(flags: Flags) -> Int {
+  0
+  |> int.bitwise_or(case flags.persisted {
+    True -> 1
+    False -> 0
+  })
 }
 
 pub fn new(kind: Kind) {

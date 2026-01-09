@@ -482,7 +482,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
           |> list.first
 
         let flags = value
-          |> result.map(fn(x) { x.flags |> option.unwrap(<<>>) })
+          |> result.map(fn(x) { x.flags })
           |> result.map(pipe.parse_flags)
           |> result.lazy_unwrap(pipe.default_flags)
 
@@ -532,7 +532,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         |> list.first
 
       let current_flags = latest_settings
-        |> result.map(fn(x) { x.flags |> option.unwrap(<<>>) })
+        |> result.map(fn(x) { x.flags })
         |> result.map(pipe.parse_flags)
         |> result.lazy_unwrap(pipe.default_flags)
 
@@ -546,7 +546,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         id:,
         node: peer_node(state.self),
         pipe:,
-        flags: Some(pipe.serialize_flags(new_flags)),
+        flags: pipe.serialize_flags(new_flags),
       )
       let with = with |> list.map(parrot_to_pturso)
 
