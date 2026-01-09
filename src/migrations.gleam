@@ -28,6 +28,21 @@ pub fn all_migrations() -> List(#(String, String)) {
       CREATE INDEX pipe_entries_node
       ON pipe_entries (node, id);
     "),
+
+    #("create pipe settings", "
+      CREATE TABLE pipe_settings (
+        id BLOB PRIMARY KEY,
+        node TEXT NOT NULL,
+        pipe TEXT NOT NULL,
+        flags BLOB
+      );
+
+      CREATE INDEX pipe_settings_pipe
+      ON pipe_settings (pipe, id);
+
+      CREATE INDEX pipe_settings_node
+      ON pipe_settings (node, id);
+    "),
   ]
 }
 
@@ -73,8 +88,9 @@ pub fn migrate(
       [_, ..] -> {
         let placeholders = list.map(ran, fn(_) { "(?)" })
           |> string.join(", ")
+        let sql = "INSERT INTO migrations (name) VALUES " <> placeholders
         let assert Ok(_) = pturso.query(
-          "INSERT INTO migrations (name) VALUES (" <> placeholders <> ")",
+          sql,
           on: conn,
           with: list.map(ran, pturso.String),
           expecting: decode.success(Nil),
