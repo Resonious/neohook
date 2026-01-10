@@ -430,8 +430,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         |> result.unwrap([])
         |> list.key_find(pipe_key)
 
-      use <- lazy_guard(when: result.is_error(pipe), return: bad_request(because: "missing `?"<>pipe_key<>"=...`"))
-      let assert Ok(pipe) = pipe
+      use pipe <- expect(pipe, or_return: bad_request(because: "missing `?"<>pipe_key<>"=...`"))
 
       let entries_subj = process.new_subject()
       process.spawn(fn() {
@@ -513,16 +512,14 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         |> result.unwrap([])
         |> list.key_find(pipe_key)
 
-      use <- lazy_guard(when: result.is_error(pipe), return: bad_request(because: "missing `?"<>pipe_key<>"=...`"))
-      let assert Ok(pipe) = pipe
+      use pipe <- expect(pipe, or_return: bad_request(because: "missing `?"<>pipe_key<>"=...`"))
 
       let body = http_wrapper.read_body(req, 1024 * 8)
       use <- lazy_guard(when: result.is_error(body), return: bad_request(because: "body too big"))
       let assert Ok(request.Request(body:, ..)) = body
 
       let new_flags = json.parse_bits(body, pipe.flags_update_decoder())
-      use <- lazy_guard(when: result.is_error(new_flags), return: bad_request(because: "missing fields"))
-      let assert Ok(new_flags) = new_flags
+      use new_flags <- expect(new_flags, or_return: bad_request(because: "missing fields"))
 
       let #(sql, with, expecting) = sql.latest_pipe_settings(pipe:)
       let with = with |> list.map(parrot_to_pturso)
@@ -724,6 +721,12 @@ pub fn forward_pipe_entries_forever(master: pipemaster.Pipemaster) {
   forward_pipe_entries_forever(master)
 }
 
+pub type SyncHint {
+  LatestID(BitArray)
+  NoID
+  ErrorRetrievingID
+}
+
 pub type DbSyncMessage {
   /// Tells a node that a new entry has been inserted.
   /// Unfortunately right now all the node can do from here is call tell_nodes_where_were_at
@@ -732,8 +735,8 @@ pub type DbSyncMessage {
 
   DbSyncHint(
     who: Peer,
-    latest_pipe_entry_id: Result(BitArray, Nil),
-    // TODO: add settings to this
+    latest_pipe_entry_id: SyncHint,
+    latest_pipe_settings_id: SyncHint,
   )
 
   DbSyncExec(
@@ -742,10 +745,15 @@ pub type DbSyncMessage {
   )
 }
 
-pub fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Peer) {
-  let #(sql, with, expecting) = sql.latest_pipe_entries()
-  let with = with |> list.map(parrot_to_pturso)
+fn sync_hint_from_result(input: Result(dict.Dict(String, BitArray), Nil), key: String) -> SyncHint {
+  case result.map(input, dict.get(_, key)) {
+    Ok(Ok(value)) -> LatestID(value)
+    Ok(Error(Nil)) -> NoID
+    Error(Nil) -> ErrorRetrievingID
+  }
+}
 
+pub fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Peer) {
   // Parrot/sqlc doesn't understand max(id)
   let hack = fn(x) {
     let fake_id = fn() { gulid.new() |> gulid.to_bitarray }
@@ -754,10 +762,32 @@ pub fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Pe
     |> result.lazy_unwrap(fake_id)
   }
 
-  let latest = pturso.query(sql, on: db, with:, expecting:)
+  let pipe_entries_subj = process.new_subject()
+  process.spawn(fn() {
+    let #(sql, with, expecting) = sql.latest_pipe_entries_by_node()
+    let with = with |> list.map(parrot_to_pturso)
+
+    pturso.query(sql, on: db, with:, expecting:)
     |> result.lazy_unwrap(list.new)
     |> list.map(fn(x) { #(x.node, hack(x.latest_id)) })
     |> dict.from_list
+    |> process.send(pipe_entries_subj, _)
+  })
+
+  let pipe_settings_subj = process.new_subject()
+  process.spawn(fn() {
+    let #(sql, with, expecting) = sql.latest_pipe_settings_by_node()
+    let with = with |> list.map(parrot_to_pturso)
+
+    pturso.query(sql, on: db, with:, expecting:)
+    |> result.lazy_unwrap(list.new)
+    |> list.map(fn(x) { #(x.node, hack(x.latest_id)) })
+    |> dict.from_list
+    |> process.send(pipe_settings_subj, _)
+  })
+
+  let pipe_entries = process.receive(pipe_entries_subj, 1000)
+  let pipe_settings = process.receive(pipe_settings_subj, 1000)
 
   let all = peers
     |> list.map(fn(peer) {
@@ -766,7 +796,8 @@ pub fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Pe
         peer_string,
         DbSyncHint(
           who: me,
-          latest_pipe_entry_id: dict.get(latest, peer_string),
+          latest_pipe_entry_id: sync_hint_from_result(pipe_entries, peer_string),
+          latest_pipe_settings_id: sync_hint_from_result(pipe_settings, peer_string),
         ),
       )
     })
@@ -803,34 +834,108 @@ fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(Stri
   #(sql, params)
 }
 
+fn pipe_settings_bulk_insert(settings: List(sql.PipeSettingsFromNodeSince)) -> #(String, List(pturso.Param)) {
+  let sql = string_tree.new()
+    |> string_tree.append("INSERT INTO pipe_settings (id, node, pipe, flags) VALUES ")
+    |> string_tree.append_tree(
+        settings
+        |> list.map(fn(_) { string_tree.from_string("(?, ?, ?, ?)") })
+        |> string_tree.join(","))
+    |> string_tree.append(" ON CONFLICT DO NOTHING")
+    |> string_tree.to_string
+
+    let params = settings
+      |> list.flat_map(fn(e) { [
+        pturso.Blob(e.id),
+        pturso.String(e.node),
+        pturso.String(e.pipe),
+        pturso.Int(e.flags),
+      ] })
+
+  #(sql, params)
+}
+
+fn expect(value: Result(a, b), or_return default: fn() -> r, when_ok continue: fn(a) -> r) {
+  case value {
+    Ok(x) -> continue(x)
+    Error(_) -> default()
+  }
+}
+
+fn process_sync_hint(
+  hint: SyncHint,
+  for resource_name: String,
+  on db: pturso.Connection,
+  query_with query_fn: fn(String, BitArray) -> #(String, List(dev.Param), decode.Decoder(a)),
+  insert_with bulk_insert_fn: fn(List(a)) -> #(String, List(pturso.Param)),
+  from me: Peer,
+  to who: Peer,
+) {
+  let latest_id = case hint {
+    LatestID(id) -> Ok(id)
+    NoID -> gulid.from_parts(0, 0) |> gulid.to_bitarray |> Ok
+    ErrorRetrievingID -> Error(Nil)
+  }
+
+  use latest_id <- expect(latest_id, or_return: fn() { Nil })
+
+  let #(sql, with, expecting) = query_fn(peer_node(me), latest_id)
+  let with = list.map(with, parrot_to_pturso)
+
+  let values = pturso.query(sql, on: db, with:, expecting:)
+    |> result.lazy_unwrap(list.new)
+
+  case values {
+    [_, ..] -> {
+      let #(sql, params) = bulk_insert_fn(values)
+      let followup = DbSyncExec(sql:, with: params)
+      logging.log(logging.Info, "Sending " <> int.to_string(list.length(values)) <> " " <> resource_name)
+      peer_send_db_sync(who, followup)
+    }
+    [] -> Nil
+  }
+}
+
 pub fn db_receive_loop_iter(message: DbSyncMessage, db: pturso.Connection, me: Peer) {
   case message {
     DbSyncNewEntry(who:) -> {
       tell_nodes_where_were_at(db, [who], me)
     }
 
-    DbSyncHint(who, latest_pipe_entry_id) -> {
-      let latest_pipe_entry_id = case latest_pipe_entry_id {
-        Ok(p) -> p
-        Error(Nil) -> gulid.from_parts(0, 0) |> gulid.to_bitarray
-      }
+    DbSyncHint(who, latest_pipe_entry_id, latest_pipe_settings_id) -> {
+      let subj = process.new_subject()
 
-      let #(sql, with, expecting) = sql.pipe_entries_from_node_since(
-        node: peer_node(me), id: latest_pipe_entry_id,
-      )
-      let with = with |> list.map(parrot_to_pturso)
+      process.spawn_unlinked(fn() {
+        process_sync_hint(
+          latest_pipe_entry_id,
+          for: "pipe entries",
+          on: db,
+          query_with: sql.pipe_entries_from_node_since,
+          insert_with: pipe_entry_bulk_insert,
+          from: me,
+          to: who,
+        )
+        process.send(subj, Nil)
+      })
 
-      let entries = pturso.query(sql, on: db, with:, expecting:) |> result.lazy_unwrap(list.new)
+      process.spawn_unlinked(fn() {
+        process_sync_hint(
+          latest_pipe_settings_id,
+          for: "pipe settings",
+          on: db,
+          query_with: sql.pipe_settings_from_node_since,
+          insert_with: pipe_settings_bulk_insert,
+          from: me,
+          to: who,
+        )
+        process.send(subj, Nil)
+      })
 
-      case entries {
-        [_, ..] -> {
-          let #(sql, params) = pipe_entry_bulk_insert(entries)
-          let followup = DbSyncExec(sql:, with: params)
-          logging.log(logging.Info, "Sending " <> int.to_string(list.length(entries)) <> " pipe entries")
-          peer_send_db_sync(who, followup)
-        }
-        [] -> Nil
-      }
+      // Wait a little bit for each to finish
+      let _ = process.receive(subj, within: 500)
+      let _ = process.receive(subj, within: 500)
+
+      Nil
     }
 
     DbSyncExec(sql, with) -> {

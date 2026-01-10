@@ -26,7 +26,7 @@ FROM pipe_entries
 WHERE node = ?
 AND id > ?;
 
--- name: latest_pipe_entries :many
+-- name: latest_pipe_entries_by_node :many
 select node, max(id) as latest_id
 from pipe_entries
 group by node;

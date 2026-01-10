@@ -128,22 +128,24 @@ pub fn pipe_entries_from_node_since_decoder() -> decode.Decoder(
   ))
 }
 
-pub type LatestPipeEntries {
-  LatestPipeEntries(node: String, latest_id: Option(decode.Dynamic))
+pub type LatestPipeEntriesByNode {
+  LatestPipeEntriesByNode(node: String, latest_id: Option(decode.Dynamic))
 }
 
-pub fn latest_pipe_entries() {
+pub fn latest_pipe_entries_by_node() {
   let sql =
     "select node, max(id) as latest_id
 from pipe_entries
 group by node"
-  #(sql, [], latest_pipe_entries_decoder())
+  #(sql, [], latest_pipe_entries_by_node_decoder())
 }
 
-pub fn latest_pipe_entries_decoder() -> decode.Decoder(LatestPipeEntries) {
+pub fn latest_pipe_entries_by_node_decoder() -> decode.Decoder(
+  LatestPipeEntriesByNode,
+) {
   use node <- decode.field(0, decode.string)
   use latest_id <- decode.field(1, decode.optional(decode.dynamic))
-  decode.success(LatestPipeEntries(node:, latest_id:))
+  decode.success(LatestPipeEntriesByNode(node:, latest_id:))
 }
 
 pub fn insert_pipe_settings(
@@ -185,4 +187,56 @@ pub fn latest_pipe_settings_decoder() -> decode.Decoder(LatestPipeSettings) {
   use pipe <- decode.field(2, decode.string)
   use flags <- decode.field(3, decode.int)
   decode.success(LatestPipeSettings(id:, node:, pipe:, flags:))
+}
+
+pub type PipeSettingsFromNodeSince {
+  PipeSettingsFromNodeSince(
+    id: BitArray,
+    node: String,
+    pipe: String,
+    flags: Int,
+  )
+}
+
+pub fn pipe_settings_from_node_since(node node: String, id id: BitArray) {
+  let sql =
+    "SELECT id, node, pipe, flags
+FROM pipe_settings
+WHERE node = ?
+AND id > ?"
+  #(
+    sql,
+    [dev.ParamString(node), dev.ParamBitArray(id)],
+    pipe_settings_from_node_since_decoder(),
+  )
+}
+
+pub fn pipe_settings_from_node_since_decoder() -> decode.Decoder(
+  PipeSettingsFromNodeSince,
+) {
+  use id <- decode.field(0, decode.bit_array)
+  use node <- decode.field(1, decode.string)
+  use pipe <- decode.field(2, decode.string)
+  use flags <- decode.field(3, decode.int)
+  decode.success(PipeSettingsFromNodeSince(id:, node:, pipe:, flags:))
+}
+
+pub type LatestPipeSettingsByNode {
+  LatestPipeSettingsByNode(node: String, latest_id: Option(decode.Dynamic))
+}
+
+pub fn latest_pipe_settings_by_node() {
+  let sql =
+    "select node, max(id) as latest_id
+from pipe_settings
+group by node"
+  #(sql, [], latest_pipe_settings_by_node_decoder())
+}
+
+pub fn latest_pipe_settings_by_node_decoder() -> decode.Decoder(
+  LatestPipeSettingsByNode,
+) {
+  use node <- decode.field(0, decode.string)
+  use latest_id <- decode.field(1, decode.optional(decode.dynamic))
+  decode.success(LatestPipeSettingsByNode(node:, latest_id:))
 }

@@ -266,6 +266,30 @@ pub fn peer_test() {
 
   should.equal(body, bit_array.from_string("Sent to 1"))
   should.equal(id_in_state2, id_in_state1)
+
+  // Other way around should work too
+  // (tests sync of persistence setting)
+
+  // Send something with state2
+  let req = request.new()
+    |> request.set_method(http.Post)
+    |> request.set_path("/test/1")
+    |> request.set_header("user-agent", "curl/8.0.0")
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Bod"), on_sse: no_sse))
+
+  let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state2)
+
+  // It should appear in state2's DB too
+  process_db_syncs(peer1, db1)
+  process_db_syncs(peer2, db2)
+  process_db_syncs(peer1, db1)
+  process_db_syncs(peer2, db2)
+
+  let assert [Entry(
+    body: <<"Bod":utf8>>,
+    ..
+  ), ..] = fetch_entries(for: "test/1", from: state1)
+  Nil
 }
 
 // This tests a case where given the naive implementation of sending pipe entries
