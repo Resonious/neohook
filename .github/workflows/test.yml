@@ -26,7 +26,7 @@ jobs:
 
       - name: Download erso binary
         run: |
-          curl -L -o erso https://github.com/Resonious/pturso/releases/download/0.0.1/erso-x86_64-linux
+          curl -L -o erso https://github.com/Resonious/pturso/releases/download/0.0.3/erso-x86_64-linux
           chmod +x erso
 
       - uses: erlef/setup-beam@v1
