@@ -265,6 +265,10 @@ pub fn peer_node(peer: Peer) {
   }
 }
 
+fn sender_of_request(req: request.Request(whatever)) -> String {
+  todo as "get IP address..?? is that lost?"
+}
+
 fn send_to_pipe(
   req: Request,
   pipe_name: String,
@@ -281,6 +285,7 @@ fn send_to_pipe(
           method: req.method,
           headers: [#("x-snd-id", id_string), ..req.headers],
           body: req.body,
+          sender: sender_of_request(req),
         )
       )
 

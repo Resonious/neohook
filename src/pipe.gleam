@@ -23,6 +23,7 @@ pub type Entry {
     method: http.Method,
     headers: List(http.Header),
     body: BitArray,
+    sender: String,
   )
 }
 
