@@ -272,12 +272,13 @@ fn send_to_pipe(
   case http_wrapper.read_body(req, 1024 * 100 * 50) {
     Ok(req) -> {
       let id = gulid.new()
+      let id_string = state.ulid_to_string(id)
       let message = pipemaster.PushEntry(
         pipe_name,
         pipe.Entry(
           id: gulid.to_bitarray(id),
           method: req.method,
-          headers: [#("x-snd-id", state.ulid_to_string(id)), ..req.headers],
+          headers: [#("x-snd-id", id_string), ..req.headers],
           body: req.body,
         )
       )
@@ -323,9 +324,12 @@ fn send_to_pipe(
         peer_send_pipe_entry(peer, message)
       })
 
+      let response_body = bytes_tree.from_string(id_string)
+        |> bytes_tree.append(<<"\n":utf8>>)
+
       response.new(200)
       |> response.set_header("content-type", "text/plain")
-      |> response.set_body(mist.Bytes(bytes_tree.from_string("Sent\n")))
+      |> response.set_body(mist.Bytes(response_body))
     }
     Error(mist.ExcessBody) ->
       response.new(413)
