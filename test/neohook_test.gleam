@@ -1,3 +1,4 @@
+import neohook/counter
 import gleam/function
 import gleam/list
 import gleam/result
@@ -31,7 +32,8 @@ pub fn main() -> Nil {
 }
 
 pub fn curl_test() {
-  let assert Ok(master) = pipemaster.new()
+  let ctr = counter.new_memory()
+  let assert Ok(master) = pipemaster.new(ctr)
   let db = turso_connection()
   let state = neohook.AppState(
     master: master.data,
@@ -85,7 +87,8 @@ fn default_peer() {
 }
 
 pub fn sse_test() {
-  let assert Ok(master) = pipemaster.new()
+  let ctr = counter.new_memory()
+  let assert Ok(master) = pipemaster.new(ctr)
   let db = turso_connection()
   let state = neohook.AppState(
     master: master.data,
@@ -137,7 +140,8 @@ pub fn sse_test() {
 }
 
 pub fn persisted_test() {
-  let assert Ok(master) = pipemaster.new()
+  let ctr = counter.new_memory()
+  let assert Ok(master) = pipemaster.new(ctr)
   let db = turso_connection()
   let state = neohook.AppState(
     master: master.data,
@@ -201,8 +205,9 @@ pub fn persisted_test() {
 }
 
 pub fn peer_test() {
-  let assert Ok(master1) = pipemaster.new()
-  let assert Ok(master2) = pipemaster.new()
+  let ctr = counter.new_memory()
+  let assert Ok(master1) = pipemaster.new(ctr)
+  let assert Ok(master2) = pipemaster.new(ctr)
   let db1 = turso_connection()
   let db2 = turso_connection()
 
@@ -297,8 +302,9 @@ pub fn peer_test() {
 // Specifically, this happens when one peer is down then comes back up, then a
 // new entry gets inserted before tell_nodes_where_were_at gets run.
 pub fn peer_bug_test() {
-  let assert Ok(master1) = pipemaster.new()
-  let assert Ok(master2) = pipemaster.new()
+  let ctr = counter.new_memory()
+  let assert Ok(master1) = pipemaster.new(ctr)
+  let assert Ok(master2) = pipemaster.new(ctr)
   let db1 = turso_connection()
   let db2 = turso_connection()
 

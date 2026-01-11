@@ -43,6 +43,17 @@ pub fn all_migrations() -> List(#(String, String)) {
       CREATE INDEX pipe_settings_node
       ON pipe_settings (node, id);
     "),
+
+    #("create counters", "
+      CREATE TABLE counters (
+        name TEXT NOT NULL,
+        node TEXT NOT NULL,
+        value INTEGER NOT NULL DEFAULT 0
+      );
+
+      CREATE UNIQUE INDEX counters_name_node
+      ON counters (node, name);
+    "),
   ]
 }
 

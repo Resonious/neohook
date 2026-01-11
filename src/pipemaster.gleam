@@ -1,3 +1,4 @@
+import neohook/counter
 import gleam/int
 import gleam/result
 import gleam/list
@@ -28,9 +29,9 @@ type State = dict.Dict(
 
 pub type Pipemaster = actor.Started(process.Subject(Message))
 
-pub fn new() -> Result(Pipemaster, actor.StartError) {
+pub fn new(ctr: counter.Counter) -> Result(Pipemaster, actor.StartError) {
   actor.new(dict.new())
-  |> actor.on_message(handle_message)
+  |> actor.on_message(fn(x, y) { handle_message(ctr, x, y) })
   |> actor.start
 }
 
@@ -39,6 +40,7 @@ pub fn new_pipe_id() -> Int {
 }
 
 fn handle_message(
+  ctr: counter.Counter,
   state: State,
   message: Message,
 ) -> actor.Next(State, Message) {
@@ -48,6 +50,8 @@ fn handle_message(
       |> result.lazy_unwrap(dict.new)
       |> dict.values
       |> list.each(process.send(_, pipe.PushEntry(entry)))
+
+      ctr.incr(pipe_name <> ":" <> "TODO: entry sender!")
 
       actor.continue(state)
     }

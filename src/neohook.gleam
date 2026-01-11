@@ -1,3 +1,4 @@
+import neohook/counter
 import gleam/string_tree
 import gleam/bit_array
 import parrot/dev
@@ -1012,7 +1013,7 @@ pub fn main() {
     }
   })
 
-  let assert Ok(master) = pipemaster.new()
+  let assert Ok(master) = pipemaster.new(counter.new_memory())
 
   let me = RemotePeer(
     address: my_erlang_node_id(),
