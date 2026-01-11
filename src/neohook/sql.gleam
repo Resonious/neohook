@@ -5,151 +5,6 @@ import gleam/dynamic/decode
 import gleam/option.{type Option}
 import parrot/dev
 
-pub type InsertPipeEntry {
-  InsertPipeEntry(col_0: Int)
-}
-
-pub fn insert_pipe_entry(
-  id id: BitArray,
-  node node: String,
-  pipe pipe: String,
-  method method: Option(String),
-  headers headers: Option(String),
-  body body: Option(BitArray),
-) {
-  let sql =
-    "INSERT INTO pipe_entries (
-  id, node, pipe, method, headers, body
-)
-SELECT ?1, ?2, ?3, ?4, ?5, ?6
-WHERE (
-  SELECT (flags & 1) persisted
-  FROM pipe_settings 
-  WHERE pipe_settings.pipe = ?3
-  ORDER BY id DESC
-  LIMIT 1
-) = 1
-RETURNING 1"
-  #(
-    sql,
-    [
-      dev.ParamBitArray(id),
-      dev.ParamString(node),
-      dev.ParamString(pipe),
-      dev.ParamNullable(option.map(method, fn(v) { dev.ParamString(v) })),
-      dev.ParamNullable(option.map(headers, fn(v) { dev.ParamString(v) })),
-      dev.ParamNullable(option.map(body, fn(v) { dev.ParamBitArray(v) })),
-    ],
-    insert_pipe_entry_decoder(),
-  )
-}
-
-pub fn insert_pipe_entry_decoder() -> decode.Decoder(InsertPipeEntry) {
-  use col_0 <- decode.field(0, decode.int)
-  decode.success(InsertPipeEntry(col_0:))
-}
-
-pub type PipeEntriesByPipe {
-  PipeEntriesByPipe(
-    id: BitArray,
-    method: Option(String),
-    headers: Option(String),
-    body: Option(BitArray),
-  )
-}
-
-pub fn pipe_entries_by_pipe(
-  pipe pipe: String,
-  limit limit: Int,
-  offset offset: Int,
-) {
-  let sql =
-    "SELECT id, method, headers, body
-FROM pipe_entries
-WHERE pipe = ?
-ORDER BY id DESC
-LIMIT ?
-OFFSET ?"
-  #(
-    sql,
-    [dev.ParamString(pipe), dev.ParamInt(limit), dev.ParamInt(offset)],
-    pipe_entries_by_pipe_decoder(),
-  )
-}
-
-pub fn pipe_entries_by_pipe_decoder() -> decode.Decoder(PipeEntriesByPipe) {
-  use id <- decode.field(0, decode.bit_array)
-  use method <- decode.field(1, decode.optional(decode.string))
-  use headers <- decode.field(2, decode.optional(decode.string))
-  use body <- decode.field(3, decode.optional(decode.bit_array))
-  decode.success(PipeEntriesByPipe(id:, method:, headers:, body:))
-}
-
-pub type PipeEntriesFromNodeSince {
-  PipeEntriesFromNodeSince(
-    id: BitArray,
-    node: String,
-    pipe: String,
-    method: Option(String),
-    headers: Option(String),
-    body: Option(BitArray),
-  )
-}
-
-pub fn pipe_entries_from_node_since(node node: String, id id: BitArray) {
-  let sql =
-    "SELECT id, node, pipe, method, headers, body
-FROM pipe_entries
-WHERE node = ?
-AND id > ?
-ORDER BY id ASC
-LIMIT 100"
-  #(
-    sql,
-    [dev.ParamString(node), dev.ParamBitArray(id)],
-    pipe_entries_from_node_since_decoder(),
-  )
-}
-
-pub fn pipe_entries_from_node_since_decoder() -> decode.Decoder(
-  PipeEntriesFromNodeSince,
-) {
-  use id <- decode.field(0, decode.bit_array)
-  use node <- decode.field(1, decode.string)
-  use pipe <- decode.field(2, decode.string)
-  use method <- decode.field(3, decode.optional(decode.string))
-  use headers <- decode.field(4, decode.optional(decode.string))
-  use body <- decode.field(5, decode.optional(decode.bit_array))
-  decode.success(PipeEntriesFromNodeSince(
-    id:,
-    node:,
-    pipe:,
-    method:,
-    headers:,
-    body:,
-  ))
-}
-
-pub type LatestPipeEntriesByNode {
-  LatestPipeEntriesByNode(node: String, latest_id: Option(decode.Dynamic))
-}
-
-pub fn latest_pipe_entries_by_node() {
-  let sql =
-    "select node, max(id) as latest_id
-from pipe_entries
-group by node"
-  #(sql, [], latest_pipe_entries_by_node_decoder())
-}
-
-pub fn latest_pipe_entries_by_node_decoder() -> decode.Decoder(
-  LatestPipeEntriesByNode,
-) {
-  use node <- decode.field(0, decode.string)
-  use latest_id <- decode.field(1, decode.optional(decode.dynamic))
-  decode.success(LatestPipeEntriesByNode(node:, latest_id:))
-}
-
 pub fn insert_pipe_settings(
   id id: BitArray,
   node node: String,
@@ -243,4 +98,154 @@ pub fn latest_pipe_settings_by_node_decoder() -> decode.Decoder(
   use node <- decode.field(0, decode.string)
   use latest_id <- decode.field(1, decode.optional(decode.dynamic))
   decode.success(LatestPipeSettingsByNode(node:, latest_id:))
+}
+
+pub type InsertPipeEntry {
+  InsertPipeEntry(col_0: Int)
+}
+
+pub fn insert_pipe_entry(
+  id id: BitArray,
+  node node: String,
+  pipe pipe: String,
+  method method: Option(String),
+  headers headers: Option(String),
+  body body: Option(BitArray),
+  sender sender: Option(String),
+) {
+  let sql =
+    "INSERT INTO pipe_entries (
+  id, node, pipe, method, headers, body, sender
+)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
+WHERE (
+  SELECT (flags & 1) persisted
+  FROM pipe_settings 
+  WHERE pipe_settings.pipe = ?3
+  ORDER BY id DESC
+  LIMIT 1
+) = 1
+RETURNING 1"
+  #(
+    sql,
+    [
+      dev.ParamBitArray(id),
+      dev.ParamString(node),
+      dev.ParamString(pipe),
+      dev.ParamNullable(option.map(method, fn(v) { dev.ParamString(v) })),
+      dev.ParamNullable(option.map(headers, fn(v) { dev.ParamString(v) })),
+      dev.ParamNullable(option.map(body, fn(v) { dev.ParamBitArray(v) })),
+      dev.ParamNullable(option.map(sender, fn(v) { dev.ParamString(v) })),
+    ],
+    insert_pipe_entry_decoder(),
+  )
+}
+
+pub fn insert_pipe_entry_decoder() -> decode.Decoder(InsertPipeEntry) {
+  use col_0 <- decode.field(0, decode.int)
+  decode.success(InsertPipeEntry(col_0:))
+}
+
+pub type PipeEntriesByPipe {
+  PipeEntriesByPipe(
+    id: BitArray,
+    method: Option(String),
+    headers: Option(String),
+    body: Option(BitArray),
+  )
+}
+
+pub fn pipe_entries_by_pipe(
+  pipe pipe: String,
+  limit limit: Int,
+  offset offset: Int,
+) {
+  let sql =
+    "SELECT id, method, headers, body
+FROM pipe_entries
+WHERE pipe = ?
+ORDER BY id DESC
+LIMIT ?
+OFFSET ?"
+  #(
+    sql,
+    [dev.ParamString(pipe), dev.ParamInt(limit), dev.ParamInt(offset)],
+    pipe_entries_by_pipe_decoder(),
+  )
+}
+
+pub fn pipe_entries_by_pipe_decoder() -> decode.Decoder(PipeEntriesByPipe) {
+  use id <- decode.field(0, decode.bit_array)
+  use method <- decode.field(1, decode.optional(decode.string))
+  use headers <- decode.field(2, decode.optional(decode.string))
+  use body <- decode.field(3, decode.optional(decode.bit_array))
+  decode.success(PipeEntriesByPipe(id:, method:, headers:, body:))
+}
+
+pub type PipeEntriesFromNodeSince {
+  PipeEntriesFromNodeSince(
+    id: BitArray,
+    node: String,
+    pipe: String,
+    method: Option(String),
+    headers: Option(String),
+    body: Option(BitArray),
+    sender: Option(String),
+  )
+}
+
+pub fn pipe_entries_from_node_since(node node: String, id id: BitArray) {
+  let sql =
+    "SELECT id, node, pipe, method, headers, body, sender
+FROM pipe_entries
+WHERE node = ?
+AND id > ?
+ORDER BY id ASC
+LIMIT 100"
+  #(
+    sql,
+    [dev.ParamString(node), dev.ParamBitArray(id)],
+    pipe_entries_from_node_since_decoder(),
+  )
+}
+
+pub fn pipe_entries_from_node_since_decoder() -> decode.Decoder(
+  PipeEntriesFromNodeSince,
+) {
+  use id <- decode.field(0, decode.bit_array)
+  use node <- decode.field(1, decode.string)
+  use pipe <- decode.field(2, decode.string)
+  use method <- decode.field(3, decode.optional(decode.string))
+  use headers <- decode.field(4, decode.optional(decode.string))
+  use body <- decode.field(5, decode.optional(decode.bit_array))
+  use sender <- decode.field(6, decode.optional(decode.string))
+  decode.success(PipeEntriesFromNodeSince(
+    id:,
+    node:,
+    pipe:,
+    method:,
+    headers:,
+    body:,
+    sender:,
+  ))
+}
+
+pub type LatestPipeEntriesByNode {
+  LatestPipeEntriesByNode(node: String, latest_id: Option(decode.Dynamic))
+}
+
+pub fn latest_pipe_entries_by_node() {
+  let sql =
+    "select node, max(id) as latest_id
+from pipe_entries
+group by node"
+  #(sql, [], latest_pipe_entries_by_node_decoder())
+}
+
+pub fn latest_pipe_entries_by_node_decoder() -> decode.Decoder(
+  LatestPipeEntriesByNode,
+) {
+  use node <- decode.field(0, decode.string)
+  use latest_id <- decode.field(1, decode.optional(decode.dynamic))
+  decode.success(LatestPipeEntriesByNode(node:, latest_id:))
 }

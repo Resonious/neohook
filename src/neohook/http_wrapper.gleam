@@ -38,6 +38,15 @@ pub type SSEConnection {
   FakeSSEConnection(callback: fn(SSEEvent) -> Result(Nil, Nil))
 }
 
+pub fn ip_address(of req: Request) -> Result(String, Nil) {
+  case req.body {
+    MistBody(conn) -> mist.get_connection_info(conn)
+      |> result.map(fn(x) { x.ip_address })
+      |> result.map(mist.ip_address_to_string)
+    SimpleBody(..) -> Ok("127.0.0.1")
+  }
+}
+
 pub fn send_sse_event(
   data: string_tree.StringTree,
   to conn: SSEConnection,

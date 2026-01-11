@@ -265,8 +265,12 @@ pub fn peer_node(peer: Peer) {
   }
 }
 
-fn sender_of_request(req: request.Request(whatever)) -> String {
-  todo as "get IP address..?? is that lost?"
+fn sender_of_request(req: Request) -> option.Option(String) {
+  // TODO: fetch from auth header!!
+  case http_wrapper.ip_address(of: req) {
+    Ok(ip) -> Some("ip|" <> ip)
+    Error(Nil) -> None
+  }
 }
 
 fn send_to_pipe(
@@ -274,8 +278,9 @@ fn send_to_pipe(
   pipe_name: String,
   state: AppState,
 ) -> Response {
+  // TODO: body size should be based on user
   case http_wrapper.read_body(req, 1024 * 100 * 50) {
-    Ok(req) -> {
+    Ok(request.Request(body:, ..)) -> {
       let id = gulid.new()
       let id_string = state.ulid_to_string(id)
       let message = pipemaster.PushEntry(
@@ -284,7 +289,7 @@ fn send_to_pipe(
           id: gulid.to_bitarray(id),
           method: req.method,
           headers: [#("x-snd-id", id_string), ..req.headers],
-          body: req.body,
+          body:,
           sender: sender_of_request(req),
         )
       )
@@ -306,6 +311,7 @@ fn send_to_pipe(
         method: Some(message.entry.method |> http.method_to_string),
         headers: Some(headers_json),
         body: Some(message.entry.body),
+        sender: message.entry.sender,
       )
       let with = with |> list.map(parrot_to_pturso)
       case pturso.query(sql, on: state.db, with:, expecting:) {
@@ -823,10 +829,10 @@ pub fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Pe
 
 fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(String, List(pturso.Param)) {
   let sql = string_tree.new()
-    |> string_tree.append("INSERT INTO pipe_entries (id, node, pipe, method, headers, body) VALUES ")
+    |> string_tree.append("INSERT INTO pipe_entries (id, node, pipe, method, headers, body, sender) VALUES ")
     |> string_tree.append_tree(
         entries
-        |> list.map(fn(_) { string_tree.from_string("(?, ?, ?, ?, ?, ?)") })
+        |> list.map(fn(_) { string_tree.from_string("(?, ?, ?, ?, ?, ?, ?)") })
         |> string_tree.join(","))
     |> string_tree.append(" ON CONFLICT DO NOTHING")
     |> string_tree.to_string
@@ -839,6 +845,7 @@ fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(Stri
         option.map(e.method, pturso.String) |> option.unwrap(pturso.Null),
         option.map(e.headers, pturso.String) |> option.unwrap(pturso.Null),
         option.map(e.body, pturso.Blob) |> option.unwrap(pturso.Null),
+        option.map(e.sender, pturso.String) |> option.unwrap(pturso.Null),
       ] })
 
   #(sql, params)

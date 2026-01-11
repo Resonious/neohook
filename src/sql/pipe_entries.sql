@@ -1,8 +1,8 @@
 -- name: insert_pipe_entry :many
 INSERT INTO pipe_entries (
-  id, node, pipe, method, headers, body
+  id, node, pipe, method, headers, body, sender
 )
-SELECT :id, :node, :pipe, :method, :headers, :body
+SELECT :id, :node, :pipe, :method, :headers, :body, :sender
 WHERE (
   SELECT (flags & 1) persisted
   FROM pipe_settings 
