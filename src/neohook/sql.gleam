@@ -101,7 +101,9 @@ pub fn pipe_entries_from_node_since(node node: String, id id: BitArray) {
     "SELECT id, node, pipe, method, headers, body
 FROM pipe_entries
 WHERE node = ?
-AND id > ?"
+AND id > ?
+ORDER BY id ASC
+LIMIT 100"
   #(
     sql,
     [dev.ParamString(node), dev.ParamBitArray(id)],
@@ -203,7 +205,9 @@ pub fn pipe_settings_from_node_since(node node: String, id id: BitArray) {
     "SELECT id, node, pipe, flags
 FROM pipe_settings
 WHERE node = ?
-AND id > ?"
+AND id > ?
+ORDER BY id ASC
+LIMIT 100"
   #(
     sql,
     [dev.ParamString(node), dev.ParamBitArray(id)],

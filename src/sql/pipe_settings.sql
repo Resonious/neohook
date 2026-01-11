@@ -15,7 +15,9 @@ LIMIT 1;
 SELECT *
 FROM pipe_settings
 WHERE node = ?
-AND id > ?;
+AND id > ?
+ORDER BY id ASC
+LIMIT 100;
 
 -- name: latest_pipe_settings_by_node :many
 select node, max(id) as latest_id

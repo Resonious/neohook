@@ -24,7 +24,9 @@ OFFSET ?;
 SELECT *
 FROM pipe_entries
 WHERE node = ?
-AND id > ?;
+AND id > ?
+ORDER BY id ASC
+LIMIT 100;
 
 -- name: latest_pipe_entries_by_node :many
 select node, max(id) as latest_id
