@@ -22,7 +22,6 @@ import neohook
 import gulid
 import pipemaster
 import gleam/int
-import env
 import pturso
 import gleeunit
 
@@ -446,8 +445,7 @@ fn fetch_entries(from state: neohook.AppState, for pipe: String) -> List(Entry) 
 }
 
 fn turso_connection() -> pturso.Connection {
-  let erso_path = env.get("ERSO") |> option.unwrap("/var/www/erso")
-  let assert Ok(turso) = pturso.start(erso_path)
+  let assert Ok(turso) = pturso.start()
   let db_id = int.random(999999) |> int.to_string
   let conn = pturso.connect(turso, "test/db" <> db_id, log_with: fn(_) { Nil })
   let assert Ok(_) = migrations.migrate(conn, migrations.all_migrations())

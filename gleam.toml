@@ -22,7 +22,7 @@ gleam_json = ">= 3.1.0 and < 4.0.0"
 mist = { git = "https://github.com/rawhat/mist", ref = "7e247f75c67214dd4d9b83193379594b5d8c87ba" }
 gleam_yielder = ">= 1.1.0 and < 2.0.0"
 gulid = ">= 0.0.8 and < 1.0.0"
-pturso = { git = "https://github.com/Resonious/pturso", ref = "ed3aaaec9d905efa8f8c36c0400ed58c1219cbd3" }
+pturso = ">= 1.0.0"
 argv = ">= 1.0.2 and < 2.0.0"
 parrot = ">= 2.1.2 and < 3.0.0"
 

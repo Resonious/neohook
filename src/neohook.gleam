@@ -1010,9 +1010,7 @@ pub fn main() {
   logging.configure()
   logging.set_level(logging.Info)
 
-  // TODO: maybe the library should get the binary for you..?
-  let erso_path = env.get("ERSO") |> option.unwrap("/var/www/erso")
-  let assert Ok(turso) = pturso.start(erso_path)
+  let assert Ok(turso) = pturso.start()
 
   let db = pturso.connect(turso, "db", log_with: fn(entry) {
     logging.log(logging.Info, "SQL: " <> string.replace(entry.sql, each: "\n", with: " ") <> " [" <> int.to_string(entry.duration_ms) <> "ms]")
