@@ -43,18 +43,24 @@ pub fn curl_test() {
     peers: [],
   )
 
+  // Collect chunks via callback
+  let chunk_subj = process.new_subject()
+
   // Start listening
   let req = request.new()
     |> request.set_method(http.Get)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(
+      bit_array.from_string(""),
+      on_sse: no_sse,
+      on_chunk: fn(data) { process.send(chunk_subj, data) Ok(Nil) },
+    ))
 
   let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state)
   should.equal(status, 200)
-  // assert list.contains(headers, #("content-type", "application/octet-stream"))
 
-  let assert mist.Chunked(listener) = body
+  let assert mist.Chunked = body
 
   // Send something
   let req = request.new()
@@ -62,17 +68,22 @@ pub fn curl_test() {
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Message here"), on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(
+      bit_array.from_string("Message here"),
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
   let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state)
   should.equal(status, 200)
 
-  // The message we sent should be readable from the listener
-  let assert [welcome, message] = listener |> yielder.take(2) |> yielder.to_list
-  let welcome = bytes_tree.to_bit_array(welcome)
-  let assert Ok(message) = message |> bytes_tree.to_bit_array |> bit_array.to_string()
-
+  // The welcome message should have come through
+  let assert Ok(welcome) = process.receive(from: chunk_subj, within: 2000)
   assert bit_array.starts_with(welcome, bit_array.from_string("You are listening on"))
+
+  // The message we sent should come through
+  let assert Ok(message) = process.receive(from: chunk_subj, within: 2000)
+  let assert Ok(message) = bit_array.to_string(message)
   assert string.contains(message, "x-test-header")
   assert string.contains(message, "HITHERE")
   assert string.contains(message, "Message here")
@@ -107,13 +118,14 @@ pub fn sse_test() {
     |> request.set_header("accept", "text/event-stream")
     |> request.set_body(http_wrapper.SimpleBody(
       bit_array.from_string(""),
-      on_sse: fn(x) { process.send(subj, x) Ok(Nil) }
+      on_sse: fn(x) { process.send(subj, x) Ok(Nil) },
+      on_chunk: no_chunk,
     ))
 
   let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state)
   should.equal(status, 200)
 
-  let assert mist.ServerSentEvents(_selector) = body
+  let assert mist.ServerSentEvents = body
 
   // Send something
   let req = request.new()
@@ -121,7 +133,7 @@ pub fn sse_test() {
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Message here"), on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Message here"), on_sse: no_sse, on_chunk: no_chunk))
 
   let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state)
   should.equal(status, 200)
@@ -157,7 +169,7 @@ pub fn persisted_test() {
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("First"), on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("First"), on_sse: no_sse, on_chunk: no_chunk))
 
   let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state)
 
@@ -176,7 +188,7 @@ pub fn persisted_test() {
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Second"), on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Second"), on_sse: no_sse, on_chunk: no_chunk))
 
   let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state)
 
@@ -194,7 +206,7 @@ pub fn persisted_test() {
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Third"), on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Third"), on_sse: no_sse, on_chunk: no_chunk))
 
   let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state)
 
@@ -251,7 +263,7 @@ pub fn peer_test() {
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Sent to 1"), on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Sent to 1"), on_sse: no_sse, on_chunk: no_chunk))
 
   let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state1)
   should.equal(status, 200)
@@ -280,7 +292,7 @@ pub fn peer_test() {
     |> request.set_method(http.Post)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Bod"), on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Bod"), on_sse: no_sse, on_chunk: no_chunk))
 
   let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state2)
 
@@ -348,7 +360,7 @@ pub fn peer_bug_test() {
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Sent to 1"), on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Sent to 1"), on_sse: no_sse, on_chunk: no_chunk))
   let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state1)
   should.equal(status, 200)
 
@@ -360,7 +372,7 @@ pub fn peer_bug_test() {
     |> request.set_method(http.Post)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("new one"), on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("new one"), on_sse: no_sse, on_chunk: no_chunk))
   let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state1)
   should.equal(status, 200)
 
@@ -401,7 +413,7 @@ fn update_flags(
     |> request.set_method(http.Post)
     |> request.set_path("/api/pipe/settings")
     |> request.set_query([#("pipe", pipe)])
-    |> request.set_body(http_wrapper.SimpleBody(req_body, on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(req_body, on_sse: no_sse, on_chunk: no_chunk))
 
   let response.Response(status:, ..) = neohook.http_handler(req, state)
   should.equal(status, 204)
@@ -412,7 +424,7 @@ fn fetch_entries(from state: neohook.AppState, for pipe: String) -> List(Entry) 
     |> request.set_method(http.Get)
     |> request.set_path("/api/pipe")
     |> request.set_query([#("name", pipe)])
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse))
+    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse, on_chunk: no_chunk))
 
   let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state)
   should.equal(status, 200)
@@ -443,6 +455,10 @@ fn turso_connection() -> pturso.Connection {
 }
 
 fn no_sse(_event: http_wrapper.SSEEvent) -> Result(Nil, Nil) {
+  Error(Nil)
+}
+
+fn no_chunk(_data: BitArray) -> Result(Nil, Nil) {
   Error(Nil)
 }
 

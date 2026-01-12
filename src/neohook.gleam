@@ -18,7 +18,6 @@ import termcolor
 import gleam/uri
 import env
 import tls
-import gleam/yielder
 import gleam/dict
 import gleam/string
 import pipemaster
@@ -84,17 +83,22 @@ pub fn colorize_uri(uri: uri.Uri) -> String {
   string.concat(parts)
 }
 
+type CurlState {
+  CurlState(
+    id: Int,
+    pipe_name: String,
+    master: pipemaster.Subject,
+  )
+}
+
 fn listen_on_pipe_for_curl(
   req: Request,
   pipe_name: String,
   master: pipemaster.Subject,
 ) -> Response {
-  let receiver = process.new_subject()
-  let pid = process.self()
-
   let colorized_url = req |> request.to_uri |> colorize_uri
 
-  let iter = yielder.once(fn() {
+  let welcome_message =
     bytes_tree.new()
     |> bytes_tree.append_string("You are listening on ")
     |> bytes_tree.append_string(termcolor.red)
@@ -112,33 +116,40 @@ fn listen_on_pipe_for_curl(
     |> bytes_tree.append_string(colorized_url)
     |> bytes_tree.append_string(termcolor.reset)
     |> bytes_tree.append_string("\n\n")
-  })
-  |> yielder.append(
-    yielder.repeatedly(fn() {
-      process.receive_forever(receiver)
-    })
-  )
+    |> bytes_tree.to_bit_array
 
-  let id = pipemaster.new_pipe_id()
-  case pipe.new(pipe.Curl(receiver, pid)) {
-    Ok(actor) -> {
+  http_wrapper.chunked(
+    req,
+    response.new(200) |> response.set_header("content-type", "application/octet-stream"),
+    init: fn(receiver) {
+      // Create a pipe actor that transforms pipe.Message -> BitArray
+      let pid = process.self()
+      let assert Ok(pipe_started) = pipe.new(pipe.Curl(receiver, pid))
+      let pipe_subj = pipe_started.data
+
+      // Register the pipe actor with pipemaster
+      let id = pipemaster.new_pipe_id()
       process.send(master, pipemaster.AddPipe(
-        pipe_name,
-        id,
-        actor.data,
+        name: pipe_name,
+        id: id,
+        subject: pipe_subj,
       ))
 
-      response.new(200)
-      |> response.set_body(mist.Chunked(iter))
-      |> response.set_header("content-type", "application/octet-stream")
-    }
+      // Send welcome message
+      process.send(receiver, welcome_message)
 
-    Error(err) -> {
-      echo err
-      response.new(500)
-      |> response.set_body(mist.Bytes(bytes_tree.from_string("uh oh")))
-    }
-  }
+      CurlState(id, pipe_name, master)
+    },
+    loop: fn(state, data, conn) {
+      case http_wrapper.send_chunk(conn, data) {
+        Ok(_) -> http_wrapper.chunk_continue(state)
+        Error(_) -> {
+          process.send(state.master, pipemaster.CleanPipe(state.pipe_name, remove_id: state.id))
+          http_wrapper.chunk_stop()
+        }
+      }
+    },
+  )
 }
 
 fn listen_on_pipe_for_sse(
@@ -156,11 +167,7 @@ fn listen_on_pipe_for_sse(
         id: id,
         subject: subject,
       ))
-      let selector = process.new_selector()
-        |> process.select(subject)
-      actor.initialised(SseState(id, pipe_name, master))
-      |> actor.selecting(selector)
-      |> Ok
+      SseState(id, pipe_name, master)
     },
     loop: fn(state, message, conn) {
       case pipe.handle(pipe.Sse(conn), message) {

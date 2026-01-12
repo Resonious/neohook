@@ -32,7 +32,7 @@ pub type Message {
 }
 
 pub type Kind {
-  Curl(process.Subject(bytes_tree.BytesTree), process.Pid)
+  Curl(process.Subject(BitArray), process.Pid)
   Sse(http_wrapper.SSEConnection)
 
   Dead
@@ -134,6 +134,7 @@ pub fn handle(
           |> bytes_tree.append_string("\n")
           |> bytes_tree.append_tree(body)
           |> bytes_tree.append_string("\n")
+          |> bytes_tree.to_bit_array
 
         process.send(subject, total)
 
