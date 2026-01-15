@@ -146,6 +146,55 @@
       #no-key.active, #has-key.active {
         display: flex;
       }
+
+      .keys-section {
+        width: 100%;
+        text-align: left;
+      }
+
+      .keys-section h2 {
+        font-size: 1rem;
+        margin-bottom: 12px;
+      }
+
+      .key-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        margin-bottom: 8px;
+        font-family: monospace;
+        font-size: 0.875rem;
+      }
+
+      .key-item.current {
+        border-color: green;
+        background: rgba(0, 128, 0, 0.1);
+      }
+
+      .key-id {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .current-badge {
+        font-family: system-ui, sans-serif;
+        font-size: 0.75rem;
+        color: green;
+      }
+
+      .key-item button {
+        padding: 4px 8px;
+        font-size: 0.75rem;
+        background: transparent;
+        color: red;
+        border: 1px solid red;
+        border-radius: 4px;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -191,8 +240,14 @@
           <span class="id-value" id="public-id"></span>
         </div>
         <p>Your keys are linked to this ID.</p>
+
+        <div class="keys-section">
+          <h2>Keys</h2>
+          <div id="keys-list"></div>
+        </div>
+
         <div class="danger-zone">
-          <button id="delete-btn">Delete Key</button>
+          <button id="delete-btn">Delete Account</button>
         </div>
       </section>
     </main>
@@ -210,11 +265,34 @@
       const createBtn = document.getElementById("create-btn");
       const deleteBtn = document.getElementById("delete-btn");
 
-      function generateId() {
-        const bytes = crypto.getRandomValues(new Uint8Array(8));
-        return Array.from(bytes)
-          .map(b => b.toString(16).padStart(2, "0"))
-          .join("");
+      async function createAccount() {
+        const res = await fetch("/api/accounts", { method: "POST" });
+        if (!res.ok) throw new Error("Failed to create account");
+        const data = await res.json();
+        return data.id;
+      }
+
+      async function addKeyToAccount(accountId, publicJwk) {
+        const res = await fetch(`/api/accounts/${accountId}/keys`, {
+          method: "POST",
+          body: JSON.stringify(publicJwk),
+        });
+        if (!res.ok) throw new Error("Failed to add key");
+        return await res.json();
+      }
+
+      async function fetchKeys(accountId) {
+        const res = await fetch(`/api/accounts/${accountId}/keys`);
+        if (!res.ok) throw new Error("Failed to fetch keys");
+        const data = await res.json();
+        return data.keys;
+      }
+
+      async function deleteKey(accountId, keyId) {
+        const res = await fetch(`/api/accounts/${accountId}/keys/${keyId}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error("Failed to delete key");
       }
 
       async function generateKeypair() {
@@ -246,12 +324,66 @@
         localStorage.removeItem(STORAGE_KEY);
       }
 
-      function render() {
+      function jwkMatch(a, b) {
+        return a.x === b.x && a.y === b.y;
+      }
+
+      async function renderKeys(account) {
+        const keysList = document.getElementById("keys-list");
+        keysList.innerHTML = "";
+
+        try {
+          const keys = await fetchKeys(account.id);
+          for (const key of keys) {
+            const keyJwk = JSON.parse(atob(key.jwk));
+            const isCurrent = jwkMatch(keyJwk, account.keypair.publicJwk);
+
+            const item = document.createElement("div");
+            item.className = "key-item" + (isCurrent ? " current" : "");
+
+            const idSpan = document.createElement("div");
+            idSpan.className = "key-id";
+            idSpan.textContent = key.id;
+            if (isCurrent) {
+              const badge = document.createElement("span");
+              badge.className = "current-badge";
+              badge.textContent = "(this device)";
+              idSpan.appendChild(badge);
+            }
+
+            const deleteBtn = document.createElement("button");
+            deleteBtn.textContent = "Delete";
+            deleteBtn.addEventListener("click", async () => {
+              if (!confirm("Delete this key?")) return;
+              try {
+                await deleteKey(account.id, key.id);
+                if (isCurrent) {
+                  deleteAccount();
+                  render();
+                } else {
+                  renderKeys(account);
+                }
+              } catch (err) {
+                alert(err.message);
+              }
+            });
+
+            item.appendChild(idSpan);
+            item.appendChild(deleteBtn);
+            keysList.appendChild(item);
+          }
+        } catch (err) {
+          keysList.textContent = "Failed to load keys";
+        }
+      }
+
+      async function render() {
         const account = getStoredAccount();
         if (account) {
           noKeySection.classList.remove("active");
           hasKeySection.classList.add("active");
           publicIdEl.textContent = account.id;
+          await renderKeys(account);
         } else {
           hasKeySection.classList.remove("active");
           noKeySection.classList.add("active");
@@ -259,10 +391,15 @@
       }
 
       createBtn.addEventListener("click", async () => {
-        const id = generateId();
-        const keypair = await generateKeypair();
-        storeAccount({ id, keypair });
-        render();
+        try {
+          const id = await createAccount();
+          const keypair = await generateKeypair();
+          await addKeyToAccount(id, keypair.publicJwk);
+          storeAccount({ id, keypair });
+          render();
+        } catch (err) {
+          alert(err.message);
+        }
       });
 
       deleteBtn.addEventListener("click", () => {
