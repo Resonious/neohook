@@ -249,3 +249,75 @@ pub fn latest_pipe_entries_by_node_decoder() -> decode.Decoder(
   use latest_id <- decode.field(1, decode.optional(decode.dynamic))
   decode.success(LatestPipeEntriesByNode(node:, latest_id:))
 }
+
+pub fn create_account(
+  id id: BitArray,
+  node node: String,
+  updated_at updated_at: Int,
+) {
+  let sql =
+    "INSERT INTO accounts (id, node, updated_at)
+VALUES (?1, ?2, ?3)"
+  #(sql, [
+    dev.ParamBitArray(id),
+    dev.ParamString(node),
+    dev.ParamInt(updated_at),
+  ])
+}
+
+pub fn add_key_to_account(
+  id id: BitArray,
+  node node: String,
+  updated_at updated_at: Int,
+  account_id account_id: BitArray,
+  jwk jwk: Option(BitArray),
+) {
+  let sql =
+    "INSERT INTO account_keys (id, node, updated_at, account_id, jwk)
+VALUES (?1, ?2, ?3, ?4, ?5)"
+  #(sql, [
+    dev.ParamBitArray(id),
+    dev.ParamString(node),
+    dev.ParamInt(updated_at),
+    dev.ParamBitArray(account_id),
+    dev.ParamNullable(option.map(jwk, fn(v) { dev.ParamBitArray(v) })),
+  ])
+}
+
+pub fn remove_key_from_account(
+  id id: BitArray,
+  node node: String,
+  updated_at updated_at: Int,
+  account_id account_id: BitArray,
+) {
+  let sql =
+    "INSERT INTO account_keys (id, node, updated_at, account_id, jwk)
+VALUES (?1, ?2, ?3, ?4, NULL)"
+  #(sql, [
+    dev.ParamBitArray(id),
+    dev.ParamString(node),
+    dev.ParamInt(updated_at),
+    dev.ParamBitArray(account_id),
+  ])
+}
+
+pub type KeysForAccount {
+  KeysForAccount(id: BitArray, jwk: Option(BitArray))
+}
+
+pub fn keys_for_account(account_id account_id: BitArray) {
+  let sql =
+    "SELECT id, jwk FROM (
+  SELECT id, jwk, MAX(updated_at)
+  FROM account_keys
+  WHERE account_id = ?1
+  GROUP BY id
+) WHERE jwk IS NOT NULL"
+  #(sql, [dev.ParamBitArray(account_id)], keys_for_account_decoder())
+}
+
+pub fn keys_for_account_decoder() -> decode.Decoder(KeysForAccount) {
+  use id <- decode.field(0, decode.bit_array)
+  use jwk <- decode.field(1, decode.optional(decode.bit_array))
+  decode.success(KeysForAccount(id:, jwk:))
+}

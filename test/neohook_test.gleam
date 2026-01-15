@@ -37,6 +37,7 @@ pub fn curl_test() {
   let state = neohook.AppState(
     master: master.data,
     ulid_to_string: gulid.to_string_function(),
+    ulid_from_string: gulid.from_string_function(),
     db:,
     self: default_peer(),
     peers: [],
@@ -103,6 +104,7 @@ pub fn sse_test() {
   let state = neohook.AppState(
     master: master.data,
     ulid_to_string: gulid.to_string_function(),
+    ulid_from_string: gulid.from_string_function(),
     db:,
     self: default_peer(),
     peers: [],
@@ -157,6 +159,7 @@ pub fn persisted_test() {
   let state = neohook.AppState(
     master: master.data,
     ulid_to_string: gulid.to_string_function(),
+    ulid_from_string: gulid.from_string_function(),
     db:,
     self: default_peer(),
     peers: [],
@@ -237,6 +240,7 @@ pub fn peer_test() {
   let state1 = neohook.AppState(
     master: master1.data,
     ulid_to_string: gulid.to_string_function(),
+    ulid_from_string: gulid.from_string_function(),
     db: db1,
     self: peer1,
     peers: [peer2],
@@ -245,6 +249,7 @@ pub fn peer_test() {
   let state2 = neohook.AppState(
     master: master2.data,
     ulid_to_string: gulid.to_string_function(),
+    ulid_from_string: gulid.from_string_function(),
     db: db2,
     self: peer2,
     peers: [peer1],
@@ -334,6 +339,7 @@ pub fn peer_bug_test() {
   let state1 = neohook.AppState(
     master: master1.data,
     ulid_to_string: gulid.to_string_function(),
+    ulid_from_string: gulid.from_string_function(),
     db: db1,
     self: peer1,
     peers: [peer2],
@@ -342,6 +348,7 @@ pub fn peer_bug_test() {
   let state2 = neohook.AppState(
     master: master2.data,
     ulid_to_string: gulid.to_string_function(),
+    ulid_from_string: gulid.from_string_function(),
     db: db2,
     self: peer2,
     peers: [peer1],

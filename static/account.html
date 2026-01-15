@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <title>account - snd.one</title>
+    <style>
+      *, *::before, *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --color-bg: #fff;
+        --color-text: #000;
+        --color-text-muted: #666;
+        --color-text-subtle: #999;
+        --color-border: #000;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --color-bg: #111;
+          --color-text: #eee;
+          --color-text-muted: #aaa;
+          --color-text-subtle: #777;
+          --color-border: #666;
+        }
+      }
+
+      html {
+        height: 100%;
+      }
+
+      body {
+        min-height: 100%;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        line-height: 1.6;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 2rem;
+        background-color: var(--color-bg);
+        color: var(--color-text);
+      }
+
+      main {
+        flex: 1;
+        gap: 20px;
+        width: 100%;
+        max-width: 500px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+      }
+
+      svg.logo {
+        height: fit-content;
+        width: 300px;
+        max-width: 70vw;
+      }
+
+      svg.logo path {
+        fill: var(--color-text);
+      }
+
+      h1 {
+        font-size: 1.5rem;
+        margin-bottom: 0.5rem;
+      }
+
+      p {
+        font-size: 1rem;
+        color: var(--color-text-muted);
+      }
+
+      button {
+        padding: 12px 24px;
+        font-size: 1rem;
+        background: var(--color-text);
+        color: var(--color-bg);
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        opacity: 0.85;
+      }
+
+      .id-box {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 20px;
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        width: 100%;
+      }
+
+      .id-label {
+        font-size: 0.875rem;
+        color: var(--color-text-muted);
+      }
+
+      .id-value {
+        font-family: monospace;
+        font-size: 1.25rem;
+        word-break: break-all;
+      }
+
+      .danger-zone {
+        margin-top: 40px;
+        padding-top: 20px;
+        border-top: 1px solid var(--color-border);
+        width: 100%;
+      }
+
+      .danger-zone button {
+        background: transparent;
+        color: red;
+        border: 1px solid red;
+      }
+
+      footer {
+        width: 100%;
+        text-align: center;
+        padding: 1rem;
+        color: var(--color-text-subtle);
+        font-size: 0.875rem;
+      }
+
+      #no-key, #has-key {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+        width: 100%;
+      }
+
+      #no-key.active, #has-key.active {
+        display: flex;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a href="/">
+        <svg
+           class="logo"
+           version="1.0"
+           width="1203.5pt"
+           height="312.46075pt"
+           alt="snd.one"
+           viewBox="0 0 1203.5 312.46075"
+           preserveAspectRatio="xMidYMid"
+           xmlns="http://www.w3.org/2000/svg">
+          <g
+             transform="matrix(0.1,0,0,-0.1,-99.499997,539.78628)"
+             fill="#000000"
+             stroke="none">
+            <path d="m 1625,5394 c -201,-31 -376,-127 -469,-257 -104,-146 -146,-295 -146,-517 0,-226 43,-379 159,-555 78,-120 171,-218 370,-389 91,-79 196,-175 233,-214 119,-126 168,-244 168,-402 0,-69 -5,-95 -24,-137 -14,-28 -35,-58 -48,-67 -61,-40 -181,-40 -237,1 -14,10 -37,41 -51,69 -23,45 -25,62 -28,222 l -4,172 -277,-2 -276,-3 3,-170 c 5,-271 43,-422 142,-562 129,-184 302,-269 572,-280 323,-13 542,80 681,290 81,122 118,254 125,450 5,154 -6,248 -45,372 -70,223 -184,370 -488,632 -321,276 -403,404 -393,617 7,149 47,201 164,213 38,4 67,1 99,-12 84,-31 115,-115 115,-307 v -98 h 276 277 l -6,158 c -9,275 -70,445 -207,583 -135,136 -275,189 -515,194 -77,2 -153,1 -170,-1 z m 347,-113 c 193,-50 321,-159 393,-338 31,-79 55,-213 55,-315 0,-69 -2,-79 -16,-74 -9,3 -87,6 -173,6 h -158 l -7,89 c -12,156 -49,239 -130,286 -119,70 -318,41 -387,-56 -35,-50 -59,-142 -59,-229 0,-247 108,-411 470,-712 199,-166 303,-287 375,-442 94,-198 115,-411 64,-635 -54,-234 -207,-391 -434,-447 -95,-24 -315,-24 -405,-1 -313,81 -469,326 -470,735 v 72 h 179 178 l 6,-132 c 5,-150 21,-206 75,-268 54,-63 110,-85 222,-85 111,1 171,23 221,84 95,115 91,369 -8,553 -51,93 -141,189 -352,372 -236,206 -317,294 -400,439 -80,141 -121,353 -101,533 33,314 175,494 442,564 104,27 316,27 420,1 z" />
+            <path d="m 8605,5394 c -104,-15 -192,-41 -273,-80 -205,-99 -329,-284 -372,-554 -8,-54 -10,-316 -8,-955 5,-998 0,-937 89,-1122 125,-261 349,-383 698,-383 241,0 415,63 550,198 122,124 178,239 207,433 13,86 14,232 11,973 -3,866 -3,872 -25,956 -72,271 -241,442 -507,511 -78,20 -296,34 -370,23 z m 331,-114 c 266,-68 413,-231 463,-514 14,-77 15,-1747 1,-1831 -43,-270 -199,-450 -447,-517 -62,-16 -108,-21 -223,-21 -165,0 -255,19 -363,75 -89,46 -193,154 -239,248 -77,156 -73,95 -73,1130 0,865 1,929 18,990 53,187 151,313 301,385 116,56 199,73 357,74 95,1 145,-4 205,-19 z" />
+            <path d="m 8594,4947 c -62,-30 -118,-93 -141,-161 -17,-47 -18,-113 -18,-941 v -890 l 28,-60 c 35,-75 58,-100 122,-133 66,-33 169,-41 249,-18 81,24 148,90 173,171 17,56 18,114 18,935 0,983 2,949 -72,1031 -58,64 -103,82 -213,86 -84,4 -101,1 -146,-20 z m 201,-78 c 55,-16 100,-64 120,-131 14,-49 15,-148 13,-909 -3,-795 -4,-857 -21,-894 -36,-81 -82,-109 -177,-108 -102,0 -164,45 -189,138 -7,27 -11,305 -11,886 0,927 -1,916 59,973 52,50 128,66 206,45 z" />
+            <path d="M 2710,3850 V 2340 h 270 270 l 1,868 c 0,492 4,856 9,842 11,-32 102,-335 330,-1097 l 184,-613 h 283 283 v 1510 1510 h -270 -270 l -1,-707 v -708 l -65,215 c -36,118 -128,429 -205,690 -77,261 -142,483 -145,493 -5,16 -30,17 -340,17 h -334 z m 672,1150 c 43,-146 102,-346 132,-445 74,-247 227,-762 273,-922 l 38,-133 h 38 37 v 885 885 l 168,-2 167,-3 3,-1418 2,-1417 -196,2 -197,3 -73,240 c -80,264 -513,1716 -539,1808 -16,55 -18,57 -51,57 h -34 V 3485 2430 h -170 -170 v 1420 1420 l 247,-2 246,-3 z" />
+            <path d="M 4590,3850 V 2339 l 498,3 c 550,4 547,4 687,73 225,110 342,313 366,637 6,85 9,435 6,905 -4,729 -5,773 -24,858 -63,279 -207,438 -463,516 -73,22 -89,23 -572,27 l -498,3 z m 1022,1392 c 122,-33 185,-69 264,-147 57,-57 77,-86 102,-148 69,-164 67,-137 67,-1107 0,-875 0,-875 -23,-955 -52,-189 -155,-321 -304,-390 -117,-54 -146,-57 -605,-62 l -423,-5 v 1422 1422 l 423,-4 c 392,-4 427,-6 499,-26 z" />
+            <path d="M 5070,3852 V 2769 l 203,3 202,3 54,30 c 59,33 93,76 119,152 14,43 17,137 20,832 2,496 -1,815 -7,868 -16,133 -55,203 -136,246 -36,20 -60,22 -248,27 l -207,5 z m 417,962 c 15,-11 39,-42 53,-70 l 25,-49 3,-810 c 2,-538 -1,-826 -8,-859 -16,-74 -38,-113 -78,-138 -33,-20 -49,-22 -177,-23 h -140 l -3,988 -2,989 149,-4 c 132,-3 153,-5 178,-24 z" />
+            <path d="M 9740,3850 V 2340 h 265 265 l 1,448 c 0,246 1,637 1,870 0,233 2,421 5,419 4,-5 88,-279 178,-582 70,-236 323,-1081 336,-1122 l 11,-33 h 284 284 v 1510 1510 h -270 -270 l -2,-707 -3,-708 -23,80 c -12,44 -42,145 -66,225 -80,268 -326,1102 -326,1106 0,2 -151,4 -335,4 h -335 z m 711,1015 c 186,-623 232,-779 321,-1082 l 83,-283 h 38 39 l -2,148 c -1,81 -1,479 -1,885 l 1,737 h 170 170 V 3850 2430 h -194 c -107,0 -197,4 -200,8 -5,9 -415,1369 -526,1747 -109,372 -100,350 -137,353 l -33,3 -2,-1053 -3,-1053 -167,-3 -168,-2 v 1420 1420 l 246,-2 246,-3 z" />
+            <path d="m 11620,3866 c 0,-822 3,-1501 6,-1510 6,-14 77,-16 705,-16 h 699 v 260 260 h -415 -415 v 375 375 h 325 325 v 265 265 h -325 -325 v 350 350 h 415 415 v 260 260 h -705 -705 z m 1310,1234 v -170 l -410,2 -410,3 -2,-135 c -1,-74 -2,-198 -1,-275 0,-77 1,-218 2,-312 l 1,-173 h 325 326 l -2,-165 -1,-165 h -324 -324 l -5,-22 c -4,-18 -1,-624 4,-880 l 1,-38 h 410 410 v -170 -170 l -602,2 -603,3 -3,1405 c -1,773 0,1411 3,1418 3,9 134,12 605,12 h 600 z" />
+            <path d="m 6506,3658 c -14,-125 -7,-282 19,-384 29,-114 115,-298 169,-361 20,-22 36,-44 36,-47 0,-8 -106,46 -152,78 -21,14 -38,21 -38,15 0,-22 52,-163 81,-222 132,-262 348,-425 610,-461 106,-15 260,33 344,107 110,97 163,288 121,444 -54,202 -190,355 -421,471 -103,51 -190,116 -245,181 -24,28 -45,50 -47,48 -2,-2 -8,-29 -13,-59 -10,-53 -1,-156 17,-203 5,-15 1,-14 -33,3 -117,60 -276,210 -375,355 -33,48 -61,87 -63,87 -2,0 -6,-24 -10,-52 z m 300,-401 c 92,-66 300,-157 360,-157 8,0 -5,31 -36,83 -52,88 -68,127 -51,127 5,0 12,-4 16,-9 3,-5 69,-45 147,-88 115,-63 156,-92 213,-149 116,-117 171,-246 163,-379 -9,-132 -73,-231 -186,-287 -61,-30 -74,-33 -157,-32 -103,0 -175,21 -273,79 -106,62 -228,188 -280,290 l -20,40 h 98 c 54,0 102,3 106,7 4,4 -18,36 -48,70 -159,183 -244,356 -266,541 l -8,67 85,-83 c 47,-46 109,-100 137,-120 z" />
+            <path d="m 7204,2944 c -105,-38 -174,-140 -174,-254 1,-185 174,-313 347,-256 221,73 249,374 46,493 -56,32 -157,41 -219,17 z m 153,-89 c 50,-21 72,-42 94,-90 78,-170 -128,-335 -267,-213 -47,42 -64,77 -64,138 0,78 36,132 110,164 45,20 82,20 127,1 z" />
+          </g>
+        </svg>
+      </a>
+
+      <h1>Account</h1>
+
+      <section id="no-key">
+        <p>No key found. Create one to sign your messages.</p>
+        <button id="create-btn">Create Key</button>
+      </section>
+
+      <section id="has-key">
+        <div class="id-box">
+          <span class="id-label">Your ID</span>
+          <span class="id-value" id="public-id"></span>
+        </div>
+        <p>Your keys are linked to this ID.</p>
+        <div class="danger-zone">
+          <button id="delete-btn">Delete Key</button>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      &copy; baillie.dev, LLC 2025
+    </footer>
+
+    <script>
+      const STORAGE_KEY = "snd_account";
+
+      const noKeySection = document.getElementById("no-key");
+      const hasKeySection = document.getElementById("has-key");
+      const publicIdEl = document.getElementById("public-id");
+      const createBtn = document.getElementById("create-btn");
+      const deleteBtn = document.getElementById("delete-btn");
+
+      function generateId() {
+        const bytes = crypto.getRandomValues(new Uint8Array(8));
+        return Array.from(bytes)
+          .map(b => b.toString(16).padStart(2, "0"))
+          .join("");
+      }
+
+      async function generateKeypair() {
+        const keypair = await crypto.subtle.generateKey(
+          { name: "ECDSA", namedCurve: "P-256" },
+          true,
+          ["sign", "verify"]
+        );
+        const privateJwk = await crypto.subtle.exportKey("jwk", keypair.privateKey);
+        const publicJwk = await crypto.subtle.exportKey("jwk", keypair.publicKey);
+        return { privateJwk, publicJwk };
+      }
+
+      function getStoredAccount() {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) return null;
+        try {
+          return JSON.parse(stored);
+        } catch {
+          return null;
+        }
+      }
+
+      function storeAccount(account) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(account));
+      }
+
+      function deleteAccount() {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+
+      function render() {
+        const account = getStoredAccount();
+        if (account) {
+          noKeySection.classList.remove("active");
+          hasKeySection.classList.add("active");
+          publicIdEl.textContent = account.id;
+        } else {
+          hasKeySection.classList.remove("active");
+          noKeySection.classList.add("active");
+        }
+      }
+
+      createBtn.addEventListener("click", async () => {
+        const id = generateId();
+        const keypair = await generateKeypair();
+        storeAccount({ id, keypair });
+        render();
+      });
+
+      deleteBtn.addEventListener("click", () => {
+        if (confirm("Delete your account? This cannot be undone.")) {
+          deleteAccount();
+          render();
+        }
+      });
+
+      render();
+    </script>
+  </body>
+</html>

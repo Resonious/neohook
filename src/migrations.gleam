@@ -47,6 +47,37 @@ pub fn all_migrations() -> List(#(String, String)) {
     #("add sender to pipe entries", "
       ALTER TABLE pipe_entries ADD COLUMN sender TEXT;
     "),
+
+    #("create accounts and keys", "
+      CREATE TABLE accounts (
+        id BLOB PRIMARY KEY,
+        node TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX accounts_updated_at
+      ON accounts (id, updated_at);
+
+      CREATE INDEX accounts_node
+      ON accounts (node, updated_at);
+
+      CREATE TABLE account_keys (
+        id BLOB PRIMARY KEY,
+        node TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        account_id BLOB NOT NULL,
+        jwk BLOB
+      );
+
+      CREATE INDEX account_keys_node
+      ON account_keys (node, updated_at);
+
+      CREATE INDEX account_keys_updated_at
+      ON account_keys (id, updated_at);
+
+      CREATE INDEX account_keys_account_id
+      ON account_keys (account_id, id, updated_at);
+    "),
   ]
 }
 

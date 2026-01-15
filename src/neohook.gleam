@@ -428,6 +428,7 @@ pub type AppState {
   AppState(
     master: pipemaster.Subject,
     ulid_to_string: fn(Ulid) -> String,
+    ulid_from_string: fn(String) -> Result(Ulid, gulid.UlidError),
     db: pturso.Connection,
     self: Peer,
     peers: List(Peer),
@@ -443,9 +444,16 @@ pub fn http_handler_for_mist(req: request.Request(mist.Connection), state: AppSt
   http_handler(req, state)
 }
 
+fn serve_webpage(path: List(String), req: Request, state: AppState) -> Response {
+  case path {
+    ["account"] -> serve_html("static/account.html", status: 200)
+    _ -> serve_html("static/404.html", status: 404)
+  }
+}
+
 fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response {
-  case api_path {
-    ["pipe"] -> {
+  case req.method, api_path {
+    http.Get, ["pipe"] -> {
       let pipe_key = "name"
       let pipe = req.query
         |> option.unwrap("")
@@ -527,7 +535,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
       |> response.set_body(mist.Bytes(bytes_tree.from_string_tree(payload)))
     }
 
-    ["pipe", "settings"] -> {
+    http.Post, ["pipe", "settings"] -> {
       let pipe_key = "pipe"
       let pipe = req.query
         |> option.unwrap("")
@@ -583,7 +591,122 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
       }
     }
 
-    _ -> {
+    http.Post, ["accounts"] -> {
+      let id = gulid.new()
+      let updated_at = gulid.erl_system_time_millis()
+      let #(sql, with) = sql.create_account(
+        id: id |> gulid.to_bitarray,
+        node: peer_node(state.self),
+        updated_at: 
+      )
+      let with = with |> list.map(parrot_to_pturso)
+
+      case pturso.query(sql, on: state.db, with:, expecting: decode.success(Nil)) {
+        Ok(_) -> {
+          let payload = json.object([
+            #("id", id |> state.ulid_to_string |> json.string),
+          ])
+          |> json.to_string_tree
+
+          response.new(201)
+          |> response.set_header("content-type", "application/json")
+          |> response.set_body(mist.Bytes(bytes_tree.from_string_tree(payload)))
+        }
+
+        Error(e) -> {
+          echo e
+          response.new(500)
+          |> response.set_header("content-type", "application/json")
+          |> response.set_body(mist.Bytes(bytes_tree.from_string("database error")))
+        }
+      }
+    }
+
+    http.Post, ["accounts", account_id, "keys"] -> {
+      use account_id <- expect(
+        state.ulid_from_string(account_id) |> result.map(gulid.to_bitarray),
+        or_return: bad_request(because: "invalid account_id"),
+      )
+
+      let body = http_wrapper.read_body(req, 1024 * 8)
+      use <- lazy_guard(when: result.is_error(body), return: bad_request(because: "body too big"))
+      let assert Ok(request.Request(body:, ..)) = body
+
+      let id = gulid.new()
+      let updated_at = gulid.erl_system_time_millis()
+      let #(sql, with) = sql.add_key_to_account(
+        id: id |> gulid.to_bitarray,
+        node: peer_node(state.self),
+        updated_at:,
+        account_id:,
+        jwk: Some(body),
+      )
+      let with = with |> list.map(parrot_to_pturso)
+
+      case pturso.query(sql, on: state.db, with:, expecting: decode.success(Nil)) {
+        Ok(_) -> {
+          let payload = json.object([
+            #("id", id |> state.ulid_to_string |> json.string),
+          ])
+          |> json.to_string_tree
+
+          response.new(201)
+          |> response.set_header("content-type", "application/json")
+          |> response.set_body(mist.Bytes(bytes_tree.from_string_tree(payload)))
+        }
+
+        Error(e) -> {
+          echo e
+          response.new(500)
+          |> response.set_header("content-type", "application/json")
+          |> response.set_body(mist.Bytes(bytes_tree.from_string("database error")))
+        }
+      }
+    }
+
+    http.Get, ["accounts", account_id, "keys"] -> {
+      use account_id <- expect(
+        state.ulid_from_string(account_id) |> result.map(gulid.to_bitarray),
+        or_return: bad_request(because: "invalid account_id"),
+      )
+
+      let #(sql, with, expecting) = sql.keys_for_account(account_id:)
+      let with = with |> list.map(parrot_to_pturso)
+
+      case pturso.query(sql, on: state.db, with:, expecting:) {
+        Ok(keys) -> {
+          let payload = json.object([
+            #("keys", json.array(keys, fn(key) {
+              let key_id = key.id
+                |> gulid.from_bitarray
+                |> result.map(state.ulid_to_string)
+                |> result.unwrap("")
+              let jwk = key.jwk
+                |> option.map(bit_array.base64_encode(_, True))
+                |> option.unwrap("")
+              json.object([
+                #("id", json.string(key_id)),
+                #("jwk", json.string(jwk)),
+              ])
+            })),
+          ])
+          |> json.to_string_tree
+
+          response.new(200)
+          |> response.set_header("content-type", "application/json")
+          |> response.set_body(mist.Bytes(bytes_tree.from_string_tree(payload)))
+        }
+
+        Error(e) -> {
+          echo e
+          response.new(500)
+          |> response.set_header("content-type", "application/json")
+          |> response.set_body(mist.Bytes(bytes_tree.from_string("database error")))
+        }
+      }
+    }
+
+    _, _ -> {
       response.new(404)
       |> response.set_header("content-type", "application/json")
       |> response.set_body(mist.Bytes(bytes_tree.from_string("{\"error\":\"path not found\"}")))
@@ -609,6 +732,7 @@ pub fn http_handler(req: Request, state: AppState) -> Response {
     ["favicon.svg"] -> serve_static("static/favicon.svg", "image/svg+xml")
 
     ["api", ..rest] -> serve_api(rest, req, state)
+    ["_", ..rest] -> serve_webpage(rest, req, state)
 
     parts -> {
       let pipe_name = compute_pipe_name(parts)
@@ -1041,6 +1165,7 @@ pub fn main() {
   let state = AppState(
     master: master.data,
     ulid_to_string: gulid.to_string_function(),
+    ulid_from_string: gulid.from_string_function(),
     db:,
     self: me,
     peers: globally_configured_erlang_peers(),
