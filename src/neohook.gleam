@@ -664,6 +664,41 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
       }
     }
 
+    http.Delete, ["accounts", account_id, "keys", key_id] -> {
+      use account_id <- expect(
+        state.ulid_from_string(account_id) |> result.map(gulid.to_bitarray),
+        or_return: bad_request(because: "invalid account_id"),
+      )
+      use key_id <- expect(
+        state.ulid_from_string(key_id) |> result.map(gulid.to_bitarray),
+        or_return: bad_request(because: "invalid key_id"),
+      )
+
+      let updated_at = gulid.erl_system_time_millis()
+
+      let #(sql, with) = sql.remove_key_from_account(
+        id: key_id,
+        node: peer_node(state.self),
+        updated_at:,
+        account_id:,
+      )
+      let with = with |> list.map(parrot_to_pturso)
+
+      case pturso.query(sql, on: state.db, with:, expecting: decode.success(Nil)) {
+        Ok(_) -> {
+          response.new(204)
+          |> response.set_body(mist.Bytes(bytes_tree.from_string("")))
+        }
+
+        Error(e) -> {
+          echo e
+          response.new(500)
+          |> response.set_header("content-type", "application/json")
+          |> response.set_body(mist.Bytes(bytes_tree.from_string("database error")))
+        }
+      }
+    }
+
     http.Get, ["accounts", account_id, "keys"] -> {
       use account_id <- expect(
         state.ulid_from_string(account_id) |> result.map(gulid.to_bitarray),

@@ -114,19 +114,6 @@
         word-break: break-all;
       }
 
-      .danger-zone {
-        margin-top: 40px;
-        padding-top: 20px;
-        border-top: 1px solid var(--color-border);
-        width: 100%;
-      }
-
-      .danger-zone button {
-        background: transparent;
-        color: red;
-        border: 1px solid red;
-      }
-
       footer {
         width: 100%;
         text-align: center;
@@ -246,9 +233,6 @@
           <div id="keys-list"></div>
         </div>
 
-        <div class="danger-zone">
-          <button id="delete-btn">Delete Account</button>
-        </div>
       </section>
     </main>
 
@@ -263,7 +247,6 @@
       const hasKeySection = document.getElementById("has-key");
       const publicIdEl = document.getElementById("public-id");
       const createBtn = document.getElementById("create-btn");
-      const deleteBtn = document.getElementById("delete-btn");
 
       async function createAccount() {
         const res = await fetch("/api/accounts", { method: "POST" });
@@ -351,25 +334,24 @@
               idSpan.appendChild(badge);
             }
 
-            const deleteBtn = document.createElement("button");
-            deleteBtn.textContent = "Delete";
-            deleteBtn.addEventListener("click", async () => {
-              if (!confirm("Delete this key?")) return;
-              try {
-                await deleteKey(account.id, key.id);
-                if (isCurrent) {
-                  deleteAccount();
-                  render();
-                } else {
-                  renderKeys(account);
-                }
-              } catch (err) {
-                alert(err.message);
-              }
-            });
-
             item.appendChild(idSpan);
-            item.appendChild(deleteBtn);
+
+            if (isCurrent) {
+              const deleteBtn = document.createElement("button");
+              deleteBtn.textContent = "Delete";
+              deleteBtn.addEventListener("click", async () => {
+                if (!confirm("Delete this key? You will be logged out.")) return;
+                try {
+                  await deleteKey(account.id, key.id);
+                  deleteAccount();
+                  location.reload();
+                } catch (err) {
+                  alert(err.message);
+                }
+              });
+              item.appendChild(deleteBtn);
+            }
+
             keysList.appendChild(item);
           }
         } catch (err) {
@@ -399,13 +381,6 @@
           render();
         } catch (err) {
           alert(err.message);
-        }
-      });
-
-      deleteBtn.addEventListener("click", () => {
-        if (confirm("Delete your account? This cannot be undone.")) {
-          deleteAccount();
-          render();
         }
       });
 

@@ -50,7 +50,7 @@ pub fn all_migrations() -> List(#(String, String)) {
 
     #("create accounts and keys", "
       CREATE TABLE accounts (
-        id BLOB PRIMARY KEY,
+        id BLOB NOT NULL,
         node TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
@@ -62,7 +62,7 @@ pub fn all_migrations() -> List(#(String, String)) {
       ON accounts (node, updated_at);
 
       CREATE TABLE account_keys (
-        id BLOB PRIMARY KEY,
+        id BLOB NOT NULL,
         node TEXT NOT NULL,
         updated_at INTEGER NOT NULL,
         account_id BLOB NOT NULL,
