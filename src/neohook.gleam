@@ -863,7 +863,9 @@ fn start_redirecting_to_https() {
 
         response.new(301)
         |> response.set_header("location", uri.to_string(https_uri))
-        |> response.set_body(mist.Bytes(bytes_tree.from_string("redirecting to https")))
+        |> response.set_body(mist.Bytes(bytes_tree.from_string(
+          "Try:\n\tcurl " <> colorize_uri(https_uri)
+        )))
       }
     }
   }
