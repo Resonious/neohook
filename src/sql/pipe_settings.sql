@@ -10,11 +10,3 @@ SELECT * FROM pipe_settings
 WHERE pipe = ?
 ORDER BY id DESC
 LIMIT 1;
-
--- name: pipe_settings_from_node_since :many
-SELECT *
-FROM pipe_settings
-WHERE node = ?
-AND id > ?
-ORDER BY id ASC
-LIMIT 100;

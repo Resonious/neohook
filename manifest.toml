@@ -25,7 +25,7 @@ packages = [
   { name = "logging", version = "1.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "logging", source = "hex", outer_checksum = "1098FBF10B54B44C2C7FDF0B01C1253CAFACDACABEFB4B0D027803246753E06D" },
   { name = "mist", version = "5.0.4", build_tools = ["gleam"], requirements = ["exception", "gleam_erlang", "gleam_http", "gleam_otp", "gleam_stdlib", "glisten", "gramps", "hpack_erl", "logging"], source = "git", repo = "https://github.com/rawhat/mist", commit = "7e247f75c67214dd4d9b83193379594b5d8c87ba" },
   { name = "parrot", version = "2.1.2", build_tools = ["gleam"], requirements = ["argv", "envoy", "filepath", "gleam_crypto", "gleam_httpc", "gleam_json", "gleam_stdlib", "gleam_time", "glearray", "repeatedly", "simplifile", "tom"], otp_app = "parrot", source = "hex", outer_checksum = "8842F3540127545C3D43408C25F449B6D273AE1D2AF010A8963EBA28E01294D9" },
-  { name = "pturso", version = "1.0.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "pturso", source = "hex", outer_checksum = "168E6BB6DBDECF778382F81D315AAE9358CF66BF5F84AB56DC7A484EDEB91487" },
+  { name = "pturso", version = "1.1.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "pturso", source = "hex", outer_checksum = "57E761BC6A59BECBE311E864268DA9AFACFF8940CB60E406177DA775C24828E8" },
   { name = "repeatedly", version = "2.1.2", build_tools = ["gleam"], requirements = [], otp_app = "repeatedly", source = "hex", outer_checksum = "93AE1938DDE0DC0F7034F32C1BF0D4E89ACEBA82198A1FE21F604E849DA5F589" },
   { name = "simplifile", version = "2.3.2", build_tools = ["gleam"], requirements = ["filepath", "gleam_stdlib"], otp_app = "simplifile", source = "hex", outer_checksum = "E049B4DACD4D206D87843BCF4C775A50AE0F50A52031A2FFB40C9ED07D6EC70A" },
   { name = "telemetry", version = "1.3.0", build_tools = ["rebar3"], requirements = [], otp_app = "telemetry", source = "hex", outer_checksum = "7015FC8919DBE63764F4B4B87A95B7C0996BD539E0D499BE6EC9D7F3875B79E6" },
@@ -46,4 +46,4 @@ jose = { version = ">= 1.11.0" }
 logging = { version = ">= 1.3.0 and < 2.0.0" }
 mist = { git = "https://github.com/rawhat/mist", ref = "7e247f75c67214dd4d9b83193379594b5d8c87ba" }
 parrot = { version = ">= 2.1.2 and < 3.0.0" }
-pturso = { version = ">= 1.0.0" }
+pturso = { version = ">= 1.1.0" }

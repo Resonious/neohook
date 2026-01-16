@@ -444,7 +444,7 @@ pub fn http_handler_for_mist(req: request.Request(mist.Connection), state: AppSt
   http_handler(req, state)
 }
 
-fn serve_webpage(path: List(String), req: Request, state: AppState) -> Response {
+fn serve_webpage(path: List(String), _req: Request, _state: AppState) -> Response {
   case path {
     ["account"] -> serve_html("static/account.html", status: 200)
     _ -> serve_html("static/404.html", status: 404)
@@ -989,51 +989,6 @@ pub fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Pe
   })
 }
 
-fn pipe_entry_bulk_insert(entries: List(sql.PipeEntriesFromNodeSince)) -> #(String, List(pturso.Param)) {
-  let sql = string_tree.new()
-    |> string_tree.append("INSERT INTO pipe_entries (id, node, pipe, method, headers, body, sender) VALUES ")
-    |> string_tree.append_tree(
-        entries
-        |> list.map(fn(_) { string_tree.from_string("(?, ?, ?, ?, ?, ?, ?)") })
-        |> string_tree.join(","))
-    |> string_tree.append(" ON CONFLICT DO NOTHING")
-    |> string_tree.to_string
-
-    let params = entries
-      |> list.flat_map(fn(e) { [
-        pturso.Blob(e.id),
-        pturso.String(e.node),
-        pturso.String(e.pipe),
-        option.map(e.method, pturso.String) |> option.unwrap(pturso.Null),
-        option.map(e.headers, pturso.String) |> option.unwrap(pturso.Null),
-        option.map(e.body, pturso.Blob) |> option.unwrap(pturso.Null),
-        option.map(e.sender, pturso.String) |> option.unwrap(pturso.Null),
-      ] })
-
-  #(sql, params)
-}
-
-fn pipe_settings_bulk_insert(settings: List(sql.PipeSettingsFromNodeSince)) -> #(String, List(pturso.Param)) {
-  let sql = string_tree.new()
-    |> string_tree.append("INSERT INTO pipe_settings (id, node, pipe, flags) VALUES ")
-    |> string_tree.append_tree(
-        settings
-        |> list.map(fn(_) { string_tree.from_string("(?, ?, ?, ?)") })
-        |> string_tree.join(","))
-    |> string_tree.append(" ON CONFLICT DO NOTHING")
-    |> string_tree.to_string
-
-    let params = settings
-      |> list.flat_map(fn(e) { [
-        pturso.Blob(e.id),
-        pturso.String(e.node),
-        pturso.String(e.pipe),
-        pturso.Int(e.flags),
-      ] })
-
-  #(sql, params)
-}
-
 fn expect(value: Result(a, b), or_return default: fn() -> r, when_ok continue: fn(a) -> r) {
   case value {
     Ok(x) -> continue(x)
@@ -1043,10 +998,9 @@ fn expect(value: Result(a, b), or_return default: fn() -> r, when_ok continue: f
 
 fn process_sync_hint(
   hint: SyncHint,
-  for resource_name: String,
+  for table: String,
+  with fields: List(#(String, decode.Decoder(pturso.Param))),
   on db: pturso.Connection,
-  query_with query_fn: fn(String, BitArray) -> #(String, List(dev.Param), decode.Decoder(a)),
-  insert_with bulk_insert_fn: fn(List(a)) -> #(String, List(pturso.Param)),
   from me: Peer,
   to who: Peer,
 ) {
@@ -1058,17 +1012,75 @@ fn process_sync_hint(
 
   use latest_id <- expect(latest_id, or_return: fn() { Nil })
 
-  let #(sql, with, expecting) = query_fn(peer_node(me), latest_id)
-  let with = list.map(with, parrot_to_pturso)
+  let sql = string_tree.from_string("SELECT ")
+    |> string_tree.append_tree(
+      fields
+      |> list.map(fn(x) { x.0 |> string_tree.from_string })
+      |> string_tree.join(", ")
+    )
+    |> string_tree.append(" FROM ")
+    |> string_tree.append(table)
+    |> string_tree.append(" WHERE node = ? AND id > ? ORDER BY id ASC LIMIT 100")
+    |> string_tree.to_string
 
-  let values = pturso.query(sql, on: db, with:, expecting:)
-    |> result.lazy_unwrap(list.new)
+  let with = [
+    peer_node(me) |> pturso.String,
+    latest_id |> pturso.Blob,
+  ]
+
+  let assert Ok(values) = pturso.query(sql, on: db, with:, expecting: decode.dynamic)
 
   case values {
     [_, ..] -> {
-      let #(sql, params) = bulk_insert_fn(values)
+      let sql = string_tree.from_string("INSERT INTO ")
+        |> string_tree.append(table)
+        |> string_tree.append(" (")
+        |> string_tree.append_tree(
+          fields
+          |> list.map(fn(x) { x.0 |> string_tree.from_string })
+          |> string_tree.join(", ")
+        )
+        |> string_tree.append(") VALUES ")
+        |> string_tree.append_tree(
+          values
+          |> list.map(fn(_) {
+            string_tree.from_string("(")
+            |> string_tree.append_tree(
+              fields
+              |> list.map(fn(_) { "?" |> string_tree.from_string })
+              |> string_tree.join(", ")
+            )
+            |> string_tree.append(")")
+          })
+          |> string_tree.join(",")
+        )
+        |> string_tree.append(" ON CONFLICT DO NOTHING")
+        |> string_tree.to_string
+
+      let len = list.length(fields)
+      let fields = fields
+        |> list.zip(list.range(0, len - 1))
+        |> list.map(fn(field) {
+          let #(#(field_name, decoder), index) = field
+          let extract = decode.field(index, decoder, decode.success)
+
+          fn(value) {
+            case decode.run(value, extract) {
+              Ok(x) -> x
+              Error(decode_errors) -> {
+                logging.log(logging.Error, "Failed to decode " <> field_name <> ": " <> string.inspect(decode_errors))
+                pturso.Null
+              }
+            }
+          }
+        })
+
+      let params = list.flat_map(values, fn(value) {
+        list.map(fields, fn(decode) { decode(value) })
+      })
+
       let followup = DbSyncExec(sql:, with: params)
-      logging.log(logging.Info, "Sending " <> int.to_string(list.length(values)) <> " " <> resource_name)
+      logging.log(logging.Info, "Sending " <> int.to_string(list.length(values)) <> " " <> table)
       peer_send_db_sync(who, followup)
     }
     [] -> Nil
@@ -1087,10 +1099,16 @@ pub fn db_receive_loop_iter(message: DbSyncMessage, db: pturso.Connection, me: P
       process.spawn_unlinked(fn() {
         process_sync_hint(
           latest_pipe_entry_id,
-          for: "pipe entries",
+          for: "pipe_entries",
+          with: [
+            #("id", decode.map(decode.bit_array, pturso.Blob)),
+            #("node", decode.map(decode.string, pturso.String)),
+            #("pipe", decode.map(decode.string, pturso.String)),
+            #("method", decode.map(decode.string, pturso.String) |> pturso.nullable),
+            #("headers", decode.map(decode.string, pturso.String) |> pturso.nullable),
+            #("body", decode.map(decode.bit_array, pturso.Blob) |> pturso.nullable),
+          ],
           on: db,
-          query_with: sql.pipe_entries_from_node_since,
-          insert_with: pipe_entry_bulk_insert,
           from: me,
           to: who,
         )
@@ -1100,10 +1118,14 @@ pub fn db_receive_loop_iter(message: DbSyncMessage, db: pturso.Connection, me: P
       process.spawn_unlinked(fn() {
         process_sync_hint(
           latest_pipe_settings_id,
-          for: "pipe settings",
+          for: "pipe_settings",
+          with: [
+            #("id", decode.map(decode.bit_array, pturso.Blob)),
+            #("node", decode.map(decode.string, pturso.String)),
+            #("pipe", decode.map(decode.string, pturso.String)),
+            #("flags", decode.map(decode.int, pturso.Int)),
+          ],
           on: db,
-          query_with: sql.pipe_settings_from_node_since,
-          insert_with: pipe_settings_bulk_insert,
           from: me,
           to: who,
         )

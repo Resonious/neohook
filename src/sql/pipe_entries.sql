@@ -19,11 +19,3 @@ WHERE pipe = ?
 ORDER BY id DESC
 LIMIT ?
 OFFSET ?;
-
--- name: pipe_entries_from_node_since :many
-SELECT *
-FROM pipe_entries
-WHERE node = ?
-AND id > ?
-ORDER BY id ASC
-LIMIT 100;

@@ -159,54 +159,6 @@ pub fn pipe_entries_by_pipe_decoder() -> decode.Decoder(PipeEntriesByPipe) {
   decode.success(PipeEntriesByPipe(id:, method:, headers:, body:))
 }
 
-pub type PipeEntriesFromNodeSince {
-  PipeEntriesFromNodeSince(
-    id: BitArray,
-    node: String,
-    pipe: String,
-    method: Option(String),
-    headers: Option(String),
-    body: Option(BitArray),
-    sender: Option(String),
-  )
-}
-
-pub fn pipe_entries_from_node_since(node node: String, id id: BitArray) {
-  let sql =
-    "SELECT id, node, pipe, method, headers, body, sender
-FROM pipe_entries
-WHERE node = ?
-AND id > ?
-ORDER BY id ASC
-LIMIT 100"
-  #(
-    sql,
-    [dev.ParamString(node), dev.ParamBitArray(id)],
-    pipe_entries_from_node_since_decoder(),
-  )
-}
-
-pub fn pipe_entries_from_node_since_decoder() -> decode.Decoder(
-  PipeEntriesFromNodeSince,
-) {
-  use id <- decode.field(0, decode.bit_array)
-  use node <- decode.field(1, decode.string)
-  use pipe <- decode.field(2, decode.string)
-  use method <- decode.field(3, decode.optional(decode.string))
-  use headers <- decode.field(4, decode.optional(decode.string))
-  use body <- decode.field(5, decode.optional(decode.bit_array))
-  use sender <- decode.field(6, decode.optional(decode.string))
-  decode.success(PipeEntriesFromNodeSince(
-    id:,
-    node:,
-    pipe:,
-    method:,
-    headers:,
-    body:,
-    sender:,
-  ))
-}
-
 pub fn insert_pipe_settings(
   id id: BitArray,
   node node: String,
@@ -246,38 +198,4 @@ pub fn latest_pipe_settings_decoder() -> decode.Decoder(LatestPipeSettings) {
   use pipe <- decode.field(2, decode.string)
   use flags <- decode.field(3, decode.int)
   decode.success(LatestPipeSettings(id:, node:, pipe:, flags:))
-}
-
-pub type PipeSettingsFromNodeSince {
-  PipeSettingsFromNodeSince(
-    id: BitArray,
-    node: String,
-    pipe: String,
-    flags: Int,
-  )
-}
-
-pub fn pipe_settings_from_node_since(node node: String, id id: BitArray) {
-  let sql =
-    "SELECT id, node, pipe, flags
-FROM pipe_settings
-WHERE node = ?
-AND id > ?
-ORDER BY id ASC
-LIMIT 100"
-  #(
-    sql,
-    [dev.ParamString(node), dev.ParamBitArray(id)],
-    pipe_settings_from_node_since_decoder(),
-  )
-}
-
-pub fn pipe_settings_from_node_since_decoder() -> decode.Decoder(
-  PipeSettingsFromNodeSince,
-) {
-  use id <- decode.field(0, decode.bit_array)
-  use node <- decode.field(1, decode.string)
-  use pipe <- decode.field(2, decode.string)
-  use flags <- decode.field(3, decode.int)
-  decode.success(PipeSettingsFromNodeSince(id:, node:, pipe:, flags:))
 }
