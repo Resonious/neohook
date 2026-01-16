@@ -937,37 +937,31 @@ fn sync_hint_from_result(input: Result(dict.Dict(String, BitArray), Nil), key: S
   }
 }
 
-pub fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Peer) {
-  // Parrot/sqlc doesn't understand max(id)
-  let hack = fn(x) {
-    let fake_id = fn() { gulid.new() |> gulid.to_bitarray }
-    option.lazy_unwrap(x, fn() { fake_id() |> dynamic.bit_array })
-    |> decode.run(decode.bit_array)
-    |> result.lazy_unwrap(fake_id)
+fn latest_x_by_node(table: String, on db: pturso.Connection) {
+  let expecting = {
+    use node <- decode.field(0, decode.string)
+    use latest_id <- decode.field(1, decode.bit_array)
+    decode.success(#(node, latest_id))
   }
+  let sql =
+    "select node, max(id) as latest_id
+    from "<>table<>"
+    group by node"
 
+  pturso.query(sql, on: db, with: [], expecting:)
+  |> result.lazy_unwrap(list.new)
+  |> dict.from_list
+}
+
+pub fn tell_nodes_where_were_at(db: pturso.Connection, peers: List(Peer), me: Peer) {
   let pipe_entries_subj = process.new_subject()
   process.spawn(fn() {
-    let #(sql, with, expecting) = sql.latest_pipe_entries_by_node()
-    let with = with |> list.map(parrot_to_pturso)
-
-    pturso.query(sql, on: db, with:, expecting:)
-    |> result.lazy_unwrap(list.new)
-    |> list.map(fn(x) { #(x.node, hack(x.latest_id)) })
-    |> dict.from_list
-    |> process.send(pipe_entries_subj, _)
+    latest_x_by_node("pipe_entries", on: db) |> process.send(pipe_entries_subj, _)
   })
 
   let pipe_settings_subj = process.new_subject()
   process.spawn(fn() {
-    let #(sql, with, expecting) = sql.latest_pipe_settings_by_node()
-    let with = with |> list.map(parrot_to_pturso)
-
-    pturso.query(sql, on: db, with:, expecting:)
-    |> result.lazy_unwrap(list.new)
-    |> list.map(fn(x) { #(x.node, hack(x.latest_id)) })
-    |> dict.from_list
-    |> process.send(pipe_settings_subj, _)
+    latest_x_by_node("pipe_settings", on: db) |> process.send(pipe_settings_subj, _)
   })
 
   let pipe_entries = process.receive(pipe_entries_subj, 1000)

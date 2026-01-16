@@ -27,8 +27,3 @@ WHERE node = ?
 AND id > ?
 ORDER BY id ASC
 LIMIT 100;
-
--- name: latest_pipe_entries_by_node :many
-select node, max(id) as latest_id
-from pipe_entries
-group by node;

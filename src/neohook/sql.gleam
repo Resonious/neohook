@@ -5,99 +5,76 @@ import gleam/dynamic/decode
 import gleam/option.{type Option}
 import parrot/dev
 
-pub fn insert_pipe_settings(
+pub fn create_account(
   id id: BitArray,
   node node: String,
-  pipe pipe: String,
-  flags flags: Int,
+  updated_at updated_at: Int,
 ) {
   let sql =
-    "INSERT INTO pipe_settings (
-  id, node, pipe, flags
-) VALUES (
-  ?, ?, ?, ?
-)"
+    "INSERT INTO accounts (id, node, updated_at)
+VALUES (?1, ?2, ?3)"
   #(sql, [
     dev.ParamBitArray(id),
     dev.ParamString(node),
-    dev.ParamString(pipe),
-    dev.ParamInt(flags),
+    dev.ParamInt(updated_at),
   ])
 }
 
-pub type LatestPipeSettings {
-  LatestPipeSettings(id: BitArray, node: String, pipe: String, flags: Int)
-}
-
-pub fn latest_pipe_settings(pipe pipe: String) {
-  let sql =
-    "SELECT id, node, pipe, flags FROM pipe_settings
-WHERE pipe = ?
-ORDER BY id DESC
-LIMIT 1"
-  #(sql, [dev.ParamString(pipe)], latest_pipe_settings_decoder())
-}
-
-pub fn latest_pipe_settings_decoder() -> decode.Decoder(LatestPipeSettings) {
-  use id <- decode.field(0, decode.bit_array)
-  use node <- decode.field(1, decode.string)
-  use pipe <- decode.field(2, decode.string)
-  use flags <- decode.field(3, decode.int)
-  decode.success(LatestPipeSettings(id:, node:, pipe:, flags:))
-}
-
-pub type PipeSettingsFromNodeSince {
-  PipeSettingsFromNodeSince(
-    id: BitArray,
-    node: String,
-    pipe: String,
-    flags: Int,
-  )
-}
-
-pub fn pipe_settings_from_node_since(node node: String, id id: BitArray) {
-  let sql =
-    "SELECT id, node, pipe, flags
-FROM pipe_settings
-WHERE node = ?
-AND id > ?
-ORDER BY id ASC
-LIMIT 100"
-  #(
-    sql,
-    [dev.ParamString(node), dev.ParamBitArray(id)],
-    pipe_settings_from_node_since_decoder(),
-  )
-}
-
-pub fn pipe_settings_from_node_since_decoder() -> decode.Decoder(
-  PipeSettingsFromNodeSince,
+pub fn add_key_to_account(
+  id id: BitArray,
+  node node: String,
+  updated_at updated_at: Int,
+  account_id account_id: BitArray,
+  jwk jwk: Option(BitArray),
 ) {
-  use id <- decode.field(0, decode.bit_array)
-  use node <- decode.field(1, decode.string)
-  use pipe <- decode.field(2, decode.string)
-  use flags <- decode.field(3, decode.int)
-  decode.success(PipeSettingsFromNodeSince(id:, node:, pipe:, flags:))
-}
-
-pub type LatestPipeSettingsByNode {
-  LatestPipeSettingsByNode(node: String, latest_id: Option(decode.Dynamic))
-}
-
-pub fn latest_pipe_settings_by_node() {
   let sql =
-    "select node, max(id) as latest_id
-from pipe_settings
-group by node"
-  #(sql, [], latest_pipe_settings_by_node_decoder())
+    "INSERT INTO account_keys (id, node, updated_at, account_id, jwk)
+VALUES (?1, ?2, ?3, ?4, ?5)"
+  #(sql, [
+    dev.ParamBitArray(id),
+    dev.ParamString(node),
+    dev.ParamInt(updated_at),
+    dev.ParamBitArray(account_id),
+    dev.ParamNullable(option.map(jwk, fn(v) { dev.ParamBitArray(v) })),
+  ])
 }
 
-pub fn latest_pipe_settings_by_node_decoder() -> decode.Decoder(
-  LatestPipeSettingsByNode,
+pub fn remove_key_from_account(
+  id id: BitArray,
+  node node: String,
+  updated_at updated_at: Int,
+  account_id account_id: BitArray,
 ) {
-  use node <- decode.field(0, decode.string)
-  use latest_id <- decode.field(1, decode.optional(decode.dynamic))
-  decode.success(LatestPipeSettingsByNode(node:, latest_id:))
+  let sql =
+    "INSERT INTO account_keys (id, node, updated_at, account_id, jwk)
+VALUES (?1, ?2, ?3, ?4, NULL)"
+  #(sql, [
+    dev.ParamBitArray(id),
+    dev.ParamString(node),
+    dev.ParamInt(updated_at),
+    dev.ParamBitArray(account_id),
+  ])
+}
+
+pub type KeysForAccount {
+  KeysForAccount(id: BitArray, jwk: Option(BitArray))
+}
+
+pub fn keys_for_account(account_id account_id: BitArray) {
+  let sql =
+    "SELECT id, jwk FROM (
+  SELECT id, jwk, MAX(updated_at)
+  FROM account_keys
+  WHERE account_id = ?1
+  GROUP BY id
+) WHERE jwk IS NOT NULL"
+  #(sql, [dev.ParamBitArray(account_id)], keys_for_account_decoder())
+}
+
+pub fn keys_for_account_decoder() -> decode.Decoder(KeysForAccount) {
+  use id <- decode.field(0, decode.bit_array)
+  use jwk <- decode.field(1, decode.optional(decode.bit_array))
+  decode.success(KeysForAccount(id:, jwk:))
 }
 
 pub type InsertPipeEntry {
@@ -230,94 +207,77 @@ pub fn pipe_entries_from_node_since_decoder() -> decode.Decoder(
   ))
 }
 
-pub type LatestPipeEntriesByNode {
-  LatestPipeEntriesByNode(node: String, latest_id: Option(decode.Dynamic))
-}
-
-pub fn latest_pipe_entries_by_node() {
-  let sql =
-    "select node, max(id) as latest_id
-from pipe_entries
-group by node"
-  #(sql, [], latest_pipe_entries_by_node_decoder())
-}
-
-pub fn latest_pipe_entries_by_node_decoder() -> decode.Decoder(
-  LatestPipeEntriesByNode,
-) {
-  use node <- decode.field(0, decode.string)
-  use latest_id <- decode.field(1, decode.optional(decode.dynamic))
-  decode.success(LatestPipeEntriesByNode(node:, latest_id:))
-}
-
-pub fn create_account(
+pub fn insert_pipe_settings(
   id id: BitArray,
   node node: String,
-  updated_at updated_at: Int,
+  pipe pipe: String,
+  flags flags: Int,
 ) {
   let sql =
-    "INSERT INTO accounts (id, node, updated_at)
-VALUES (?1, ?2, ?3)"
+    "INSERT INTO pipe_settings (
+  id, node, pipe, flags
+) VALUES (
+  ?, ?, ?, ?
+)"
   #(sql, [
     dev.ParamBitArray(id),
     dev.ParamString(node),
-    dev.ParamInt(updated_at),
+    dev.ParamString(pipe),
+    dev.ParamInt(flags),
   ])
 }
 
-pub fn add_key_to_account(
-  id id: BitArray,
-  node node: String,
-  updated_at updated_at: Int,
-  account_id account_id: BitArray,
-  jwk jwk: Option(BitArray),
-) {
+pub type LatestPipeSettings {
+  LatestPipeSettings(id: BitArray, node: String, pipe: String, flags: Int)
+}
+
+pub fn latest_pipe_settings(pipe pipe: String) {
   let sql =
-    "INSERT INTO account_keys (id, node, updated_at, account_id, jwk)
-VALUES (?1, ?2, ?3, ?4, ?5)"
-  #(sql, [
-    dev.ParamBitArray(id),
-    dev.ParamString(node),
-    dev.ParamInt(updated_at),
-    dev.ParamBitArray(account_id),
-    dev.ParamNullable(option.map(jwk, fn(v) { dev.ParamBitArray(v) })),
-  ])
+    "SELECT id, node, pipe, flags FROM pipe_settings
+WHERE pipe = ?
+ORDER BY id DESC
+LIMIT 1"
+  #(sql, [dev.ParamString(pipe)], latest_pipe_settings_decoder())
 }
 
-pub fn remove_key_from_account(
-  id id: BitArray,
-  node node: String,
-  updated_at updated_at: Int,
-  account_id account_id: BitArray,
-) {
-  let sql =
-    "INSERT INTO account_keys (id, node, updated_at, account_id, jwk)
-VALUES (?1, ?2, ?3, ?4, NULL)"
-  #(sql, [
-    dev.ParamBitArray(id),
-    dev.ParamString(node),
-    dev.ParamInt(updated_at),
-    dev.ParamBitArray(account_id),
-  ])
-}
-
-pub type KeysForAccount {
-  KeysForAccount(id: BitArray, jwk: Option(BitArray))
-}
-
-pub fn keys_for_account(account_id account_id: BitArray) {
-  let sql =
-    "SELECT id, jwk FROM (
-  SELECT id, jwk, MAX(updated_at)
-  FROM account_keys
-  WHERE account_id = ?1
-  GROUP BY id
-) WHERE jwk IS NOT NULL"
-  #(sql, [dev.ParamBitArray(account_id)], keys_for_account_decoder())
-}
-
-pub fn keys_for_account_decoder() -> decode.Decoder(KeysForAccount) {
+pub fn latest_pipe_settings_decoder() -> decode.Decoder(LatestPipeSettings) {
   use id <- decode.field(0, decode.bit_array)
-  use jwk <- decode.field(1, decode.optional(decode.bit_array))
-  decode.success(KeysForAccount(id:, jwk:))
+  use node <- decode.field(1, decode.string)
+  use pipe <- decode.field(2, decode.string)
+  use flags <- decode.field(3, decode.int)
+  decode.success(LatestPipeSettings(id:, node:, pipe:, flags:))
+}
+
+pub type PipeSettingsFromNodeSince {
+  PipeSettingsFromNodeSince(
+    id: BitArray,
+    node: String,
+    pipe: String,
+    flags: Int,
+  )
+}
+
+pub fn pipe_settings_from_node_since(node node: String, id id: BitArray) {
+  let sql =
+    "SELECT id, node, pipe, flags
+FROM pipe_settings
+WHERE node = ?
+AND id > ?
+ORDER BY id ASC
+LIMIT 100"
+  #(
+    sql,
+    [dev.ParamString(node), dev.ParamBitArray(id)],
+    pipe_settings_from_node_since_decoder(),
+  )
+}
+
+pub fn pipe_settings_from_node_since_decoder() -> decode.Decoder(
+  PipeSettingsFromNodeSince,
+) {
+  use id <- decode.field(0, decode.bit_array)
+  use node <- decode.field(1, decode.string)
+  use pipe <- decode.field(2, decode.string)
+  use flags <- decode.field(3, decode.int)
+  decode.success(PipeSettingsFromNodeSince(id:, node:, pipe:, flags:))
 }
