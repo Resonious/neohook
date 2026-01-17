@@ -300,6 +300,7 @@ fn send_to_pipe(
           sender: sender_of_request(req),
         )
       )
+      let namespace = pipe_namespace(of: pipe_name)
 
       // This sends the entry to all active listeners.
       process.send(state.master, message)
@@ -315,6 +316,7 @@ fn send_to_pipe(
         id: message.entry.id,
         node: peer_node(state.self),
         pipe: pipe_name,
+        namespace:,
         method: Some(message.entry.method |> http.method_to_string),
         headers: Some(headers_json),
         body: Some(message.entry.body),
@@ -462,6 +464,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         |> list.key_find(pipe_key)
 
       use pipe <- expect(pipe, or_return: bad_request(because: "missing `?"<>pipe_key<>"=...`"))
+      let namespace = pipe_namespace(of: pipe)
 
       let entries_subj = process.new_subject()
       process.spawn(fn() {
@@ -504,7 +507,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
 
       let settings_subj = process.new_subject()
       process.spawn(fn() {
-        let #(sql, with, expecting) = sql.latest_pipe_settings(pipe:)
+        let #(sql, with, expecting) = sql.latest_pipe_settings(namespace:)
         let with = with |> list.map(parrot_to_pturso)
 
         let value = pturso.query(sql, on: state.db, with:, expecting:)
@@ -544,6 +547,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         |> list.key_find(pipe_key)
 
       use pipe <- expect(pipe, or_return: bad_request(because: "missing `?"<>pipe_key<>"=...`"))
+      let namespace = pipe_namespace(of: pipe)
 
       let body = http_wrapper.read_body(req, 1024 * 8)
       use <- lazy_guard(when: result.is_error(body), return: bad_request(because: "body too big"))
@@ -552,7 +556,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
       let new_flags = json.parse_bits(body, pipe.flags_update_decoder())
       use new_flags <- expect(new_flags, or_return: bad_request(because: "missing fields"))
 
-      let #(sql, with, expecting) = sql.latest_pipe_settings(pipe:)
+      let #(sql, with, expecting) = sql.latest_pipe_settings(namespace:)
       let with = with |> list.map(parrot_to_pturso)
 
       let latest_settings = pturso.query(sql, on: state.db, with:, expecting:)
@@ -573,7 +577,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
       let #(sql, with) = sql.insert_pipe_settings(
         id:,
         node: peer_node(state.self),
-        pipe:,
+        namespace:,
         flags: pipe.serialize_flags(new_flags),
       )
       let with = with |> list.map(parrot_to_pturso)
@@ -826,6 +830,13 @@ fn compute_pipe_name(parts: List(String)) -> option.Option(String) {
   case is_invalid {
     True -> option.None
     False -> option.Some(name)
+  }
+}
+
+fn pipe_namespace(of pipe_name: String) -> String {
+  case string.split_once(pipe_name, on: "/") {
+    Ok(#(namespace, _)) -> namespace
+    Error(Nil) -> pipe_name
   }
 }
 
@@ -1122,7 +1133,7 @@ pub fn db_receive_loop_iter(message: DbSyncMessage, db: pturso.Connection, me: P
           with: [
             #("id", decode.map(decode.bit_array, pturso.Blob)),
             #("node", decode.map(decode.string, pturso.String)),
-            #("pipe", decode.map(decode.string, pturso.String)),
+            #("namespace", decode.map(decode.string, pturso.String)),
             #("flags", decode.map(decode.int, pturso.Int)),
           ],
           on: db,

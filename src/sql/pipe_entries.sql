@@ -6,7 +6,7 @@ SELECT :id, :node, :pipe, :method, :headers, :body, :sender
 WHERE (
   SELECT (flags & 1) persisted
   FROM pipe_settings 
-  WHERE pipe_settings.pipe = :pipe
+  WHERE pipe_settings.namespace = :namespace
   ORDER BY id DESC
   LIMIT 1
 ) = 1

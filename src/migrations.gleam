@@ -33,12 +33,12 @@ pub fn all_migrations() -> List(#(String, String)) {
       CREATE TABLE pipe_settings (
         id BLOB PRIMARY KEY,
         node TEXT NOT NULL,
-        pipe TEXT NOT NULL,
+        namespace TEXT NOT NULL,
         flags INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE INDEX pipe_settings_pipe
-      ON pipe_settings (pipe, id);
+      ON pipe_settings (namespace, id);
 
       CREATE INDEX pipe_settings_node
       ON pipe_settings (node, id);

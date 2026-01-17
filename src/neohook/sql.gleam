@@ -77,6 +77,47 @@ pub fn keys_for_account_decoder() -> decode.Decoder(KeysForAccount) {
   decode.success(KeysForAccount(id:, jwk:))
 }
 
+pub fn insert_pipe_settings(
+  id id: BitArray,
+  node node: String,
+  namespace namespace: String,
+  flags flags: Int,
+) {
+  let sql =
+    "INSERT INTO pipe_settings (
+  id, node, namespace, flags
+) VALUES (
+  ?, ?, ?, ?
+)"
+  #(sql, [
+    dev.ParamBitArray(id),
+    dev.ParamString(node),
+    dev.ParamString(namespace),
+    dev.ParamInt(flags),
+  ])
+}
+
+pub type LatestPipeSettings {
+  LatestPipeSettings(id: BitArray, node: String, namespace: String, flags: Int)
+}
+
+pub fn latest_pipe_settings(namespace namespace: String) {
+  let sql =
+    "SELECT id, node, namespace, flags FROM pipe_settings
+WHERE namespace = ?
+ORDER BY id DESC
+LIMIT 1"
+  #(sql, [dev.ParamString(namespace)], latest_pipe_settings_decoder())
+}
+
+pub fn latest_pipe_settings_decoder() -> decode.Decoder(LatestPipeSettings) {
+  use id <- decode.field(0, decode.bit_array)
+  use node <- decode.field(1, decode.string)
+  use namespace <- decode.field(2, decode.string)
+  use flags <- decode.field(3, decode.int)
+  decode.success(LatestPipeSettings(id:, node:, namespace:, flags:))
+}
+
 pub type InsertPipeEntry {
   InsertPipeEntry(col_0: Int)
 }
@@ -89,6 +130,7 @@ pub fn insert_pipe_entry(
   headers headers: Option(String),
   body body: Option(BitArray),
   sender sender: Option(String),
+  namespace namespace: String,
 ) {
   let sql =
     "INSERT INTO pipe_entries (
@@ -98,7 +140,7 @@ SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
 WHERE (
   SELECT (flags & 1) persisted
   FROM pipe_settings 
-  WHERE pipe_settings.pipe = ?3
+  WHERE pipe_settings.namespace = ?8
   ORDER BY id DESC
   LIMIT 1
 ) = 1
@@ -113,6 +155,7 @@ RETURNING 1"
       dev.ParamNullable(option.map(headers, fn(v) { dev.ParamString(v) })),
       dev.ParamNullable(option.map(body, fn(v) { dev.ParamBitArray(v) })),
       dev.ParamNullable(option.map(sender, fn(v) { dev.ParamString(v) })),
+      dev.ParamString(namespace),
     ],
     insert_pipe_entry_decoder(),
   )
@@ -157,45 +200,4 @@ pub fn pipe_entries_by_pipe_decoder() -> decode.Decoder(PipeEntriesByPipe) {
   use headers <- decode.field(2, decode.optional(decode.string))
   use body <- decode.field(3, decode.optional(decode.bit_array))
   decode.success(PipeEntriesByPipe(id:, method:, headers:, body:))
-}
-
-pub fn insert_pipe_settings(
-  id id: BitArray,
-  node node: String,
-  pipe pipe: String,
-  flags flags: Int,
-) {
-  let sql =
-    "INSERT INTO pipe_settings (
-  id, node, pipe, flags
-) VALUES (
-  ?, ?, ?, ?
-)"
-  #(sql, [
-    dev.ParamBitArray(id),
-    dev.ParamString(node),
-    dev.ParamString(pipe),
-    dev.ParamInt(flags),
-  ])
-}
-
-pub type LatestPipeSettings {
-  LatestPipeSettings(id: BitArray, node: String, pipe: String, flags: Int)
-}
-
-pub fn latest_pipe_settings(pipe pipe: String) {
-  let sql =
-    "SELECT id, node, pipe, flags FROM pipe_settings
-WHERE pipe = ?
-ORDER BY id DESC
-LIMIT 1"
-  #(sql, [dev.ParamString(pipe)], latest_pipe_settings_decoder())
-}
-
-pub fn latest_pipe_settings_decoder() -> decode.Decoder(LatestPipeSettings) {
-  use id <- decode.field(0, decode.bit_array)
-  use node <- decode.field(1, decode.string)
-  use pipe <- decode.field(2, decode.string)
-  use flags <- decode.field(3, decode.int)
-  decode.success(LatestPipeSettings(id:, node:, pipe:, flags:))
 }
