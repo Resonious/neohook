@@ -7,7 +7,9 @@
     jwt_verify_full/2,
     jwt_sign/2,
     jwt_sign_with_alg/3,
-    jwk_algorithm/1
+    jwk_algorithm/1,
+    jwt_peek_payload/1,
+    jwt_peek/1
 ]).
 
 %% Create a JWK from PEM data
@@ -121,3 +123,25 @@ get_alg_name({jose_jws_alg_hmac, Alg}) -> atom_to_binary(Alg, utf8);
 get_alg_name({jose_jws_alg_eddsa, Alg}) -> atom_to_binary(Alg, utf8);
 get_alg_name(Alg) when is_atom(Alg) -> atom_to_binary(Alg, utf8);
 get_alg_name(_) -> <<"unknown">>.
+
+%% Peek at JWT payload without verifying signature
+jwt_peek_payload(JwtString) when is_binary(JwtString) ->
+    try
+        {jose_jwt, Claims} = jose_jwt:peek_payload(JwtString),
+        {ok, Claims}
+    catch
+        _:Reason ->
+            {error, {decode_error, format_error(Reason)}}
+    end.
+
+%% Peek at both JWT header and payload without verifying signature
+jwt_peek(JwtString) when is_binary(JwtString) ->
+    try
+        {jose_jwt, Claims} = jose_jwt:peek_payload(JwtString),
+        HeaderJson = jose_jws:peek_protected(JwtString),
+        Header = json:decode(HeaderJson),
+        {ok, {Header, Claims}}
+    catch
+        _:Reason ->
+            {error, {decode_error, format_error(Reason)}}
+    end.

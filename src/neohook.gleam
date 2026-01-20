@@ -1,12 +1,13 @@
+import neohook/user
 import neohook/counter
 import gleam/string_tree
 import gleam/bit_array
-import parrot/dev
 import gleam/dynamic/decode
 import gleam/json
 import neohook/sql
 import neohook/http_wrapper.{type Request, type Response}
 import pturso
+import util.{parrot_to_pturso}
 import migrations
 import gulid.{type Ulid}
 import gleam/dynamic
@@ -235,23 +236,6 @@ fn peer_send_db_sync(peer: Peer, message: DbSyncMessage) {
   }
 }
 
-fn parrot_to_pturso(p: dev.Param) -> pturso.Param {
-  case p {
-    dev.ParamInt(x) -> pturso.Int(x)
-    dev.ParamString(x) -> pturso.String(x)
-    dev.ParamFloat(x) -> pturso.Float(x)
-    dev.ParamBool(True) -> pturso.Int(1)
-    dev.ParamBool(False) -> pturso.Int(0)
-    dev.ParamBitArray(x) -> pturso.Blob(x)
-    dev.ParamTimestamp(_) -> panic as "not supported"
-    dev.ParamDate(_) -> panic as "not supported"
-    dev.ParamList(_) -> panic as "not supported"
-    dev.ParamDynamic(_) -> panic as "not supported"
-    dev.ParamNullable(Some(x)) -> parrot_to_pturso(x)
-    dev.ParamNullable(None) -> pturso.Null
-  }
-}
-
 pub type Peer {
   LocalPeer(
     name: String,
@@ -272,19 +256,17 @@ pub fn peer_node(peer: Peer) {
   }
 }
 
-fn sender_of_request(req: Request) -> option.Option(String) {
-  // TODO: fetch from auth header!!
-  case http_wrapper.ip_address(of: req) {
-    Ok(ip) -> Some("ip|" <> ip)
-    Error(Nil) -> None
-  }
-}
-
 fn send_to_pipe(
   req: Request,
   pipe_name: String,
   state: AppState,
 ) -> Response {
+  let user = user.from_request(
+    req,
+    state.db,
+    state.ulid_from_string,
+  )
+
   // TODO: body size should be based on user
   case http_wrapper.read_body(req, 1024 * 100 * 50) {
     Ok(request.Request(body:, ..)) -> {
@@ -297,7 +279,7 @@ fn send_to_pipe(
           method: req.method,
           headers: [#("x-snd-id", id_string), ..req.headers],
           body:,
-          sender: sender_of_request(req),
+          sender: Some(user.to_string(user, state.ulid_to_string)),
         )
       )
       let namespace = pipe_namespace(of: pipe_name)

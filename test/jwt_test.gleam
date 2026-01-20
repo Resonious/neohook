@@ -247,3 +247,43 @@ pub fn jwk_from_json_empty_object_test() {
   let result = jwt.jwk_from_json("{}")
   should.be_error(result)
 }
+
+// ============================================================================
+// Peek Tests
+// ============================================================================
+
+pub fn peek_payload_test() {
+  let assert Ok(claims) = jwt.peek_payload(rsa_jwt)
+
+  let sub_decoder = {
+    use sub <- decode.field("sub", decode.string)
+    decode.success(sub)
+  }
+  let assert Ok(sub) = decode.run(claims, sub_decoder)
+  should.equal(sub, "1234567890")
+}
+
+pub fn peek_test() {
+  let assert Ok(#(header, claims)) = jwt.peek(ec_jwt)
+
+  // Check header
+  let alg_decoder = {
+    use alg <- decode.field("alg", decode.string)
+    decode.success(alg)
+  }
+  let assert Ok(alg) = decode.run(header, alg_decoder)
+  should.equal(alg, "ES256")
+
+  // Check claims
+  let sub_decoder = {
+    use sub <- decode.field("sub", decode.string)
+    decode.success(sub)
+  }
+  let assert Ok(sub) = decode.run(claims, sub_decoder)
+  should.equal(sub, "9876543210")
+}
+
+pub fn peek_invalid_jwt_test() {
+  let result = jwt.peek_payload("not.a.jwt")
+  should.be_error(result)
+}

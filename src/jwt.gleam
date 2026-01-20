@@ -1,3 +1,4 @@
+import gleam/string
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/json
@@ -15,6 +16,16 @@ pub type JwtError {
   InvalidJwk
   VerificationFailed
   DecodeError(String)
+}
+
+pub fn jwk_from_string(pem_or_json: String) -> Result(Jwk, JwtError) {
+  let seems_like_pem = string.slice(pem_or_json, at_index: 0, length: 20)
+    |> string.contains("BEGIN")
+
+  case seems_like_pem {
+    True -> jwk_from_pem(pem_or_json)
+    False -> jwk_from_json(pem_or_json)
+  }
 }
 
 /// Create a JWK from PEM-encoded key data (RSA or EC)
@@ -63,6 +74,16 @@ pub fn sign_with_alg(
 /// Get the algorithm from a JWK
 @external(erlang, "jwt_ffi", "jwk_algorithm")
 pub fn jwk_algorithm(jwk: Jwk) -> Result(String, JwtError)
+
+/// Peek at the JWT payload without verifying the signature
+/// WARNING: This does NOT verify the signature - use only for inspection
+@external(erlang, "jwt_ffi", "jwt_peek_payload")
+pub fn peek_payload(jwt_string: String) -> Result(Dynamic, JwtError)
+
+/// Peek at both JWT header and payload without verifying the signature
+/// WARNING: This does NOT verify the signature - use only for inspection
+@external(erlang, "jwt_ffi", "jwt_peek")
+pub fn peek(jwt_string: String) -> Result(#(Dynamic, Dynamic), JwtError)
 
 /// Convenience function: verify a JWT from PEM key
 pub fn verify_with_pem(
