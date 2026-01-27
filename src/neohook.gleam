@@ -766,14 +766,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         pturso.query(sql, on: state.db, with:, expecting:)
         |> result.map(
           list.filter_map(_, fn(key) {
-            let id = {
-              use string <- result.try(bit_array.to_string(key.id))
-              use ulid <- result.try(
-                state.ulid_from_string(string) |> result.replace_error(Nil),
-              )
-              Ok(ulid)
-            }
-
+            let id = gulid.from_bitarray(key.id)
             case id, key.jwk {
               Ok(id), Some(jwk) -> Ok(user.Key(id:, jwk:))
               _, _ -> Error(Nil)
