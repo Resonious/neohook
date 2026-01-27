@@ -192,7 +192,7 @@ pub fn keys_for_account(account_id account_id: BitArray) {
   FROM account_keys
   WHERE account_id = ?1
   GROUP BY id
-)"
+) WHERE jwk IS NOT NULL"
   #(sql, [dev.ParamBitArray(account_id)], keys_for_account_decoder())
 }
 

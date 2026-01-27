@@ -16,7 +16,7 @@ SELECT id, jwk FROM (
   FROM account_keys
   WHERE account_id = :account_id
   GROUP BY id
-);
+) WHERE jwk IS NOT NULL;
 
 -- name: fetch_account_key :one
 SELECT jwk, account_id

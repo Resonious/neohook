@@ -570,7 +570,7 @@ pub fn accounts_test() {
   let decoder = decode.field("keys", key_decoder, decode.success)
   let assert Ok(fetched_key_ids) =
     resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
-  should.equal(key_ids, fetched_key_ids)
+  should.equal(fetched_key_ids, key_ids)
 
   // Delete key
   let assert [key1_id, key2_id] = key_ids
@@ -604,7 +604,7 @@ pub fn accounts_test() {
   let decoder = decode.field("keys", key_decoder, decode.success)
   let assert Ok(fetched_key_ids) =
     resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
-  should.equal([key1_id], fetched_key_ids)
+  should.equal(fetched_key_ids, [key1_id])
 }
 
 // Utility functions //
