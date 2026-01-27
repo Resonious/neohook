@@ -11,12 +11,15 @@ INSERT INTO account_keys (id, node, updated_at, account_id, jwk)
 VALUES (:id, :node, :updated_at, :account_id, NULL);
 
 -- name: keys_for_account :many
-SELECT id, jwk FROM (
-  SELECT id, jwk, MAX(updated_at)
-  FROM account_keys
-  WHERE account_id = :account_id
-  GROUP BY id
-) WHERE jwk IS NOT NULL;
+SELECT id, jwk
+FROM account_keys ak
+WHERE ak.account_id = :account_id
+  AND ak.jwk IS NOT NULL
+  AND ak.updated_at = (
+    SELECT MAX(updated_at)
+    FROM account_keys ak2
+    WHERE ak2.id = ak.id AND ak2.account_id = :account_id
+  );
 
 -- name: fetch_account_key :one
 SELECT jwk, account_id

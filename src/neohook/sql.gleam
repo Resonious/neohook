@@ -187,12 +187,15 @@ pub type KeysForAccount {
 
 pub fn keys_for_account(account_id account_id: BitArray) {
   let sql =
-    "SELECT id, jwk FROM (
-  SELECT id, jwk, MAX(updated_at)
-  FROM account_keys
-  WHERE account_id = ?1
-  GROUP BY id
-) WHERE jwk IS NOT NULL"
+    "SELECT id, jwk
+FROM account_keys ak
+WHERE ak.account_id = ?1
+  AND ak.jwk IS NOT NULL
+  AND ak.updated_at = (
+    SELECT MAX(updated_at)
+    FROM account_keys ak2
+    WHERE ak2.id = ak.id AND ak2.account_id = ?1
+  )"
   #(sql, [dev.ParamBitArray(account_id)], keys_for_account_decoder())
 }
 
