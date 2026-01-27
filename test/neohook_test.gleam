@@ -1,3 +1,4 @@
+import shcribe
 import neohook/counter
 import gleam/function
 import gleam/list
@@ -415,13 +416,15 @@ fn update_flags(
     |> json.to_string
     |> bit_array.from_string
 
+  let handler = shcribe.wrap(neohook.http_handler(_, state), with: shcribe_config())
+
   let req = request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/api/pipe/settings")
     |> request.set_query([#("pipe", pipe)])
     |> request.set_body(http_wrapper.SimpleBody(req_body, on_sse: no_sse, on_chunk: no_chunk))
 
-  let response.Response(status:, ..) = neohook.http_handler(req, state)
+  let response.Response(status:, ..) = handler(req)
   should.equal(status, 204)
 }
 
@@ -432,7 +435,9 @@ fn fetch_entries(from state: neohook.AppState, for pipe: String) -> List(Entry) 
     |> request.set_query([#("name", pipe)])
     |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse, on_chunk: no_chunk))
 
-  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state)
+  let handler = shcribe.wrap(neohook.http_handler(_, state), with: shcribe_config())
+
+  let response.Response(status:, headers: _, body:) = handler(req)
   should.equal(status, 200)
 
   let assert mist.Bytes(body) = body
@@ -449,6 +454,22 @@ fn fetch_entries(from state: neohook.AppState, for pipe: String) -> List(Entry) 
 
   let assert Ok(result) = json.parse_bits(bytes_tree.to_bit_array(body), decoder)
   result
+}
+
+fn shcribe_config() -> shcribe.Config(http_wrapper.Body, mist.ResponseData) {
+  shcribe.Config(
+    destination: shcribe.File("api-examples.md"),
+    converter: shcribe.Converter(
+      request: fn(body) {
+        let assert http_wrapper.SimpleBody(bytes:, ..) = body
+        bytes
+      },
+      response: fn(body) {
+        let assert mist.Bytes(bytes) = body
+        bytes |> bytes_tree.to_bit_array
+      },
+    ),
+  )
 }
 
 fn turso_connection() -> pturso.Connection {

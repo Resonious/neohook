@@ -6,3 +6,4 @@ db-*
 /build
 erl_crash.dump
 deploy/
+api-examples.md
