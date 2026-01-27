@@ -1,6 +1,6 @@
 import gleam/dynamic
 import neohook/http_wrapper
-import logging.{log, Warning}
+import logging.{log, Info}
 import gleam/bit_array
 import gleam/option
 import util.{parrot_to_pturso}
@@ -23,6 +23,10 @@ pub fn to_string(user: User, ulid_to_string: fn(Ulid) -> String) -> String {
     Authenticated(account_id:, ..) -> "acc|" <> ulid_to_string(account_id)
     Unauthenticated(ip_address:) -> "ip|" <> ip_address
   }
+}
+
+pub type Key {
+  Key(id: Ulid, jwk: BitArray)
 }
 
 pub type Claims {
@@ -117,7 +121,7 @@ pub fn from_request(
   case extract_authenticated_user(req, db, ulid_from_string) {
     Ok(u) -> u
     Error(why) -> {
-      log(Warning, "Unauthenticated: " <> why)
+      log(Info, "Unauthenticated: " <> why)
       let ip = http_wrapper.ip_address(req) |> result.unwrap("anonymous")
       Unauthenticated(ip)
     }

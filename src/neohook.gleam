@@ -694,17 +694,26 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
       let #(sql, with, expecting) = sql.keys_for_account(account_id:)
       let with = with |> list.map(parrot_to_pturso)
 
-      case pturso.query(sql, on: state.db, with:, expecting:) {
+      let query_result = pturso.query(sql, on: state.db, with:, expecting:)
+        |> result.map(list.filter_map(_, fn(key) {
+          let id = {
+            use string <- result.try(bit_array.to_string(key.id))
+            use ulid <- result.try(state.ulid_from_string(string) |> result.replace_error(Nil))
+            Ok(ulid)
+          }
+
+          case id, key.jwk {
+            Ok(id), Some(jwk) -> Ok(user.Key(id:, jwk:))
+            _, _ -> Error(Nil)
+          }
+        }))
+
+      case query_result {
         Ok(keys) -> {
           let payload = json.object([
             #("keys", json.array(keys, fn(key) {
-              let key_id = key.id
-                |> gulid.from_bitarray
-                |> result.map(state.ulid_to_string)
-                |> result.unwrap("")
-              let jwk = key.jwk
-                |> option.map(bit_array.base64_encode(_, True))
-                |> option.unwrap("")
+              let key_id = key.id |> state.ulid_to_string
+              let jwk = key.jwk |> bit_array.base64_encode(True)
               json.object([
                 #("id", json.string(key_id)),
                 #("jwk", json.string(jwk)),

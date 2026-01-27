@@ -1,3 +1,4 @@
+import jwt_test
 import shcribe
 import neohook/counter
 import gleam/function
@@ -395,6 +396,103 @@ pub fn peer_bug_test() {
 
   should.equal(body1, bit_array.from_string("Sent to 1"))
   should.equal(body2, bit_array.from_string("new one"))
+}
+
+pub fn accounts_test() {
+  let ctr = counter.new_memory()
+  let assert Ok(master1) = pipemaster.new(ctr)
+  let assert Ok(master2) = pipemaster.new(ctr)
+  let db1 = turso_connection()
+  let db2 = turso_connection()
+
+  let peer1 = neohook.LocalPeer(
+    name: "peer1",
+    pipe_entry_subj: process.new_subject(),
+    db_sync_subj: process.new_subject(),
+  )
+
+  let peer2 = neohook.LocalPeer(
+    name: "peer2",
+    pipe_entry_subj: process.new_subject(),
+    db_sync_subj: process.new_subject(),
+  )
+
+  let state1 = neohook.AppState(
+    master: master1.data,
+    ulid_to_string: gulid.to_string_function(),
+    ulid_from_string: gulid.from_string_function(),
+    db: db1,
+    self: peer1,
+    peers: [peer2],
+  )
+
+  let state2 = neohook.AppState(
+    master: master2.data,
+    ulid_to_string: gulid.to_string_function(),
+    ulid_from_string: gulid.from_string_function(),
+    db: db2,
+    self: peer2,
+    peers: [peer1],
+  )
+
+  let handler1 = shcribe.wrap(neohook.http_handler(_, state1), with: shcribe_config())
+  let handler2 = shcribe.wrap(neohook.http_handler(_, state2), with: shcribe_config())
+
+  // Create account
+  let req = request.new()
+    |> request.set_method(http.Post)
+    |> request.set_path("/api/accounts")
+    |> request.set_body(http_wrapper.SimpleBody(<<>>, on_sse: no_sse, on_chunk: no_chunk))
+
+  let assert response.Response(status: 201, body: mist.Bytes(resp), ..) = handler1(req)
+  let decoder = decode.field("id", decode.string, decode.success)
+  let assert Ok(account_id) = resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
+
+  // Add keys to account
+  let key_ids = [1, 2] |> list.map(fn(_) {
+    let req_body = jwt_test.ec_public_jwk_json |> bit_array.from_string
+    let req = request.new()
+      |> request.set_method(http.Post)
+      |> request.set_path("/api/accounts/" <> account_id <> "/keys")
+      |> request.set_body(http_wrapper.SimpleBody(req_body, on_sse: no_sse, on_chunk: no_chunk))
+
+    let assert response.Response(status: 201, body: mist.Bytes(resp), ..) = handler1(req)
+    let decoder = decode.field("id", decode.string, decode.success)
+    let assert Ok(key_id) = resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
+    key_id
+  })
+
+  // List keys
+  let req = request.new()
+    |> request.set_method(http.Get)
+    |> request.set_path("/api/accounts/" <> account_id <> "/keys")
+    |> request.set_body(http_wrapper.SimpleBody(<<>>, on_sse: no_sse, on_chunk: no_chunk))
+
+  let assert response.Response(status: 200, body: mist.Bytes(resp), ..) = handler1(req)
+  let key_decoder = decode.field("id", decode.string, decode.success) |> decode.list
+  let decoder = decode.field("keys", key_decoder, decode.success)
+  let assert Ok(fetched_key_ids) = resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
+  should.equal(key_ids, fetched_key_ids)
+
+  // Delete key
+  let assert [key1_id, key2_id] = key_ids
+  let req = request.new()
+    |> request.set_method(http.Delete)
+    |> request.set_path("/api/accounts/" <> account_id <> "/keys/" <> key2_id)
+    |> request.set_body(http_wrapper.SimpleBody(<<>>, on_sse: no_sse, on_chunk: no_chunk))
+  let assert response.Response(status: 204, body: mist.Bytes(_), ..) = handler1(req)
+
+  // Deleted key should be gone from list
+  let req = request.new()
+    |> request.set_method(http.Get)
+    |> request.set_path("/api/accounts/" <> account_id <> "/keys")
+    |> request.set_body(http_wrapper.SimpleBody(<<>>, on_sse: no_sse, on_chunk: no_chunk))
+
+  let assert response.Response(status: 200, body: mist.Bytes(resp), ..) = handler1(req)
+  let key_decoder = decode.field("id", decode.string, decode.success) |> decode.list
+  let decoder = decode.field("keys", key_decoder, decode.success)
+  let assert Ok(fetched_key_ids) = resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
+  should.equal([key1_id], fetched_key_ids)
 }
 
 ///////////////////////

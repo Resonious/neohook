@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>account.html tests</title>
+    <style>
+      body {
+        font-family: monospace;
+        padding: 2rem;
+        background: #111;
+        color: #eee;
+      }
+      .pass { color: #0f0; }
+      .fail { color: #f00; }
+      pre { margin: 0; padding: 4px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>account.html tests</h1>
+    <div id="results"></div>
+
+    <script>
+      const results = document.getElementById("results");
+      let passed = 0;
+      let failed = 0;
+
+      function log(msg, ok) {
+        const el = document.createElement("pre");
+        el.className = ok ? "pass" : "fail";
+        el.textContent = (ok ? "PASS" : "FAIL") + " " + msg;
+        results.appendChild(el);
+        if (ok) passed++; else failed++;
+      }
+
+      async function test(name, fn) {
+        try {
+          await fn();
+          log(name, true);
+        } catch (e) {
+          log(name + ": " + e.message, false);
+        }
+      }
+
+      function assert(condition, msg) {
+        if (!condition) throw new Error(msg || "assertion failed");
+      }
+
+      function assertEqual(a, b, msg) {
+        if (a !== b) throw new Error(msg || `expected ${b}, got ${a}`);
+      }
+
+      // ========================================
+      // Copy functions from account.html
+      // ========================================
+
+      function base64url(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let str = "";
+        for (const b of bytes) str += String.fromCharCode(b);
+        return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      }
+
+      function base64urlDecode(str) {
+        str = str.replace(/-/g, "+").replace(/_/g, "/");
+        while (str.length % 4) str += "=";
+        return Uint8Array.from(atob(str), c => c.charCodeAt(0));
+      }
+
+      async function generateKeypair() {
+        const keypair = await crypto.subtle.generateKey(
+          { name: "ECDSA", namedCurve: "P-256" },
+          true,
+          ["sign", "verify"]
+        );
+        const privateJwk = await crypto.subtle.exportKey("jwk", keypair.privateKey);
+        const publicJwk = await crypto.subtle.exportKey("jwk", keypair.publicKey);
+        return { privateJwk, publicJwk };
+      }
+
+      async function createJwt(privateJwk, payload = {}) {
+        const privateKey = await crypto.subtle.importKey(
+          "jwk",
+          privateJwk,
+          { name: "ECDSA", namedCurve: "P-256" },
+          false,
+          ["sign"]
+        );
+
+        const header = { alg: "ES256", typ: "JWT" };
+        const enc = new TextEncoder();
+        const headerB64 = base64url(enc.encode(JSON.stringify(header)));
+        const payloadB64 = base64url(enc.encode(JSON.stringify(payload)));
+        const data = enc.encode(`${headerB64}.${payloadB64}`);
+
+        const sig = await crypto.subtle.sign(
+          { name: "ECDSA", hash: "SHA-256" },
+          privateKey,
+          data
+        );
+
+        return `${headerB64}.${payloadB64}.${base64url(sig)}`;
+      }
+
+      async function verifyJwt(publicJwk, jwt) {
+        const publicKey = await crypto.subtle.importKey(
+          "jwk",
+          publicJwk,
+          { name: "ECDSA", namedCurve: "P-256" },
+          false,
+          ["verify"]
+        );
+
+        const [headerB64, payloadB64, sigB64] = jwt.split(".");
+        const enc = new TextEncoder();
+        const data = enc.encode(`${headerB64}.${payloadB64}`);
+        const sig = base64urlDecode(sigB64);
+
+        return await crypto.subtle.verify(
+          { name: "ECDSA", hash: "SHA-256" },
+          publicKey,
+          sig,
+          data
+        );
+      }
+
+      function getPublicKeyPem(publicJwk) {
+        const x = Uint8Array.from(atob(publicJwk.x.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+        const y = Uint8Array.from(atob(publicJwk.y.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+
+        const header = new Uint8Array([
+          0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86,
+          0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
+          0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03,
+          0x42, 0x00, 0x04
+        ]);
+
+        const der = new Uint8Array(header.length + x.length + y.length);
+        der.set(header);
+        der.set(x, header.length);
+        der.set(y, header.length + x.length);
+
+        const b64 = btoa(String.fromCharCode(...der));
+        return `-----BEGIN PUBLIC KEY-----\n${b64.match(/.{1,64}/g).join("\n")}\n-----END PUBLIC KEY-----`;
+      }
+
+      // ========================================
+      // Tests
+      // ========================================
+
+      async function runTests() {
+        await test("generateKeypair creates valid keypair", async () => {
+          const kp = await generateKeypair();
+          assert(kp.privateJwk, "should have privateJwk");
+          assert(kp.publicJwk, "should have publicJwk");
+          assertEqual(kp.privateJwk.kty, "EC");
+          assertEqual(kp.publicJwk.kty, "EC");
+          assertEqual(kp.privateJwk.crv, "P-256");
+          assertEqual(kp.publicJwk.crv, "P-256");
+          assert(kp.privateJwk.d, "private key should have d");
+          assert(!kp.publicJwk.d, "public key should not have d");
+        });
+
+        await test("createJwt produces valid JWT format", async () => {
+          const kp = await generateKeypair();
+          const jwt = await createJwt(kp.privateJwk, { sub: "test" });
+          const parts = jwt.split(".");
+          assertEqual(parts.length, 3, "JWT should have 3 parts");
+
+          const header = JSON.parse(atob(parts[0].replace(/-/g, "+").replace(/_/g, "/")));
+          assertEqual(header.alg, "ES256");
+          assertEqual(header.typ, "JWT");
+
+          const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+          assertEqual(payload.sub, "test");
+        });
+
+        await test("JWT signature verifies with public key", async () => {
+          const kp = await generateKeypair();
+          const jwt = await createJwt(kp.privateJwk, { sub: "verify-test" });
+          const valid = await verifyJwt(kp.publicJwk, jwt);
+          assert(valid, "signature should be valid");
+        });
+
+        await test("JWT signature fails with wrong key", async () => {
+          const kp1 = await generateKeypair();
+          const kp2 = await generateKeypair();
+          const jwt = await createJwt(kp1.privateJwk, { sub: "wrong-key" });
+          const valid = await verifyJwt(kp2.publicJwk, jwt);
+          assert(!valid, "signature should be invalid with wrong key");
+        });
+
+        await test("JWT signature fails when tampered", async () => {
+          const kp = await generateKeypair();
+          const jwt = await createJwt(kp.privateJwk, { sub: "tamper-test" });
+          const parts = jwt.split(".");
+          // Tamper with payload
+          const tamperedJwt = parts[0] + "." + base64url(new TextEncoder().encode('{"sub":"hacked"}')) + "." + parts[2];
+          const valid = await verifyJwt(kp.publicJwk, tamperedJwt);
+          assert(!valid, "tampered JWT should fail verification");
+        });
+
+        await test("getPublicKeyPem produces valid PEM format", async () => {
+          const kp = await generateKeypair();
+          const pem = getPublicKeyPem(kp.publicJwk);
+          assert(pem.startsWith("-----BEGIN PUBLIC KEY-----"), "should start with PEM header");
+          assert(pem.endsWith("-----END PUBLIC KEY-----"), "should end with PEM footer");
+          const lines = pem.split("\n");
+          assert(lines.length >= 3, "should have multiple lines");
+        });
+
+        await test("base64url encoding roundtrips", async () => {
+          const original = new Uint8Array([0, 1, 2, 255, 254, 253]);
+          const encoded = base64url(original);
+          const decoded = base64urlDecode(encoded);
+          assertEqual(decoded.length, original.length);
+          for (let i = 0; i < original.length; i++) {
+            assertEqual(decoded[i], original[i], `byte ${i} mismatch`);
+          }
+        });
+
+        await test("createJwt with complex payload", async () => {
+          const kp = await generateKeypair();
+          const payload = {
+            sub: "user123",
+            iat: Math.floor(Date.now() / 1000),
+            exp: Math.floor(Date.now() / 1000) + 3600,
+            custom: { nested: "value" }
+          };
+          const jwt = await createJwt(kp.privateJwk, payload);
+          const parts = jwt.split(".");
+          const decoded = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+          assertEqual(decoded.sub, "user123");
+          assertEqual(decoded.custom.nested, "value");
+        });
+
+        // Summary
+        const summary = document.createElement("pre");
+        summary.style.marginTop = "1rem";
+        summary.style.borderTop = "1px solid #666";
+        summary.style.paddingTop = "1rem";
+        summary.textContent = `\nTotal: ${passed + failed}, Passed: ${passed}, Failed: ${failed}`;
+        summary.className = failed === 0 ? "pass" : "fail";
+        results.appendChild(summary);
+      }
+
+      runTests();
+    </script>
+  </body>
+</html>

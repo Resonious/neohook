@@ -57,7 +57,7 @@ CWaYwllAGCiRvtOL35c6q9YxoNU5jZRV9g==
 -----END EC PRIVATE KEY-----"
 
 // EC public key in JWK JSON format (same key as ec_public_pem)
-const ec_public_jwk_json = "{\"kty\":\"EC\",\"x\":\"27qfMPgd5mAIH69hFDH8VAsNjZ-rR8iA1QmtBLBWxhY\",\"y\":\"E78P3b7KOwlmmMJZQBgokb7Ti9-XOqvWMaDVOY2UVfY\",\"crv\":\"P-256\"}"
+pub const ec_public_jwk_json = "{\"kty\":\"EC\",\"x\":\"27qfMPgd5mAIH69hFDH8VAsNjZ-rR8iA1QmtBLBWxhY\",\"y\":\"E78P3b7KOwlmmMJZQBgokb7Ti9-XOqvWMaDVOY2UVfY\",\"crv\":\"P-256\"}"
 
 // Pre-generated RS256 JWT signed with rsa_private_pem
 // Claims: {"sub":"1234567890","name":"Test User","iat":1516239022}
