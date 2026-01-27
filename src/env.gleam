@@ -1,9 +1,9 @@
-import gleam/result
 import gleam/bool.{guard}
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/erlang/charlist
-import gleam/option.{type Option, Some, None}
+import gleam/option.{type Option, None, Some}
+import gleam/result
 
 pub fn get(name: String) -> Option(String) {
   let var = charlist.from_string(name) |> getenv

@@ -1,14 +1,11 @@
-import gleam/result
-import gleam/option
 import gleam/dict
 import gleam/erlang/process
+import gleam/option
 import gleam/otp/actor
+import gleam/result
 
 pub type Counter {
-  Counter(
-    incr: fn(String) -> Nil,
-    fetch: fn(String) -> Int,
-  )
+  Counter(incr: fn(String) -> Nil, fetch: fn(String) -> Int)
 }
 
 type MemMsg {
@@ -18,10 +15,12 @@ type MemMsg {
 
 pub fn new_memory() -> Counter {
   // No idea why this might fail to start
-  let assert Ok(act) = actor.new(dict.new())
+  let assert Ok(act) =
+    actor.new(dict.new())
     |> actor.on_message(fn(state, msg) {
       case msg {
-        Incr(name, i) -> state
+        Incr(name, i) ->
+          state
           |> dict.upsert(name, fn(n) { option.unwrap(n, 0) + i })
           |> actor.continue
         Fetch(name, ret) -> {

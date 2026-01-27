@@ -1,17 +1,17 @@
-import gleam/dynamic
-import neohook/http_wrapper
-import logging.{log, Info}
 import gleam/bit_array
+import gleam/dynamic
+import gleam/dynamic/decode
+import gleam/http/request
+import gleam/list
 import gleam/option
-import util.{parrot_to_pturso}
+import gleam/result.{map_error, try}
 import gulid.{type Ulid, type UlidError}
+import jwt
+import logging.{Info, log}
+import neohook/http_wrapper
 import neohook/sql
 import pturso
-import gleam/result.{map_error, try}
-import gleam/dynamic/decode
-import jwt
-import gleam/list
-import gleam/http/request
+import util.{parrot_to_pturso}
 
 pub type User {
   Authenticated(account_id: Ulid, claims: Claims)
@@ -92,22 +92,38 @@ fn extract_authenticated_user(
     _ -> Error("no bearer token")
   }
 
-  use token    <- try(token)
-  use payload  <- try(jwt.peek_payload(token)        |> map_error(str("malformed jwt")))
-  use claims   <- try(get_claims(payload)            |> map_error(str("jwt payload missing fields")))
-  use key_id   <- try(ulid_from_string(claims.iss)   |> map_error(str("iss not ulid")))
-  use keys     <- try(fetch_account_keys(db, key_id) |> map_error(str("internal db error")))
-  use key      <- try(list.first(keys)               |> map_error(str("no matching keys")))
-  use jwk_bit  <- try(option.to_result(key.jwk,                       "key was deleted"))
-  use jwk_str  <- try(bit_array.to_string(jwk_bit)   |> map_error(str("key was not utf8")))
-  use jwk      <- try(jwt.jwk_from_string(jwk_str)   |> map_error(str("invalid jwk")))
-  use _verif   <- try(jwt.verify(token, jwk)         |> map_error(str("could not verify")))
-  use account_id <- try(gulid.from_bitarray(key.account_id) |> map_error(str("account id malformed")))
+  use token <- try(token)
+  use payload <- try(jwt.peek_payload(token) |> map_error(str("malformed jwt")))
+  use claims <- try(
+    get_claims(payload) |> map_error(str("jwt payload missing fields")),
+  )
+  use key_id <- try(
+    ulid_from_string(claims.iss) |> map_error(str("iss not ulid")),
+  )
+  use keys <- try(
+    fetch_account_keys(db, key_id) |> map_error(str("internal db error")),
+  )
+  use key <- try(list.first(keys) |> map_error(str("no matching keys")))
+  use jwk_bit <- try(option.to_result(key.jwk, "key was deleted"))
+  use jwk_str <- try(
+    bit_array.to_string(jwk_bit) |> map_error(str("key was not utf8")),
+  )
+  use jwk <- try(jwt.jwk_from_string(jwk_str) |> map_error(str("invalid jwk")))
+  use _verif <- try(
+    jwt.verify(token, jwk) |> map_error(str("could not verify")),
+  )
+  use account_id <- try(
+    gulid.from_bitarray(key.account_id)
+    |> map_error(str("account id malformed")),
+  )
 
-  Ok(Authenticated(account_id:, claims:,))
+  Ok(Authenticated(account_id:, claims:))
 }
 
-fn fetch_account_keys(db: pturso.Connection, id: Ulid) -> Result(List(sql.FetchAccountKey), pturso.Error) {
+fn fetch_account_keys(
+  db: pturso.Connection,
+  id: Ulid,
+) -> Result(List(sql.FetchAccountKey), pturso.Error) {
   let #(sql, with, expecting) = sql.fetch_account_key(id: gulid.to_bitarray(id))
   let with = with |> list.map(parrot_to_pturso)
   pturso.query(sql, on: db, with:, expecting:)

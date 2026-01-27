@@ -116,7 +116,8 @@ pub fn rsa_verify_claims_test() {
 
 pub fn rsa_invalid_signature_test() {
   // Tamper with the JWT by changing one character in the signature
-  let tampered_jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlRlc3QgVXNlciIsImlhdCI6MTUxNjIzOTAyMn0.INVALID_SIGNATURE_HERE"
+  let tampered_jwt =
+    "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlRlc3QgVXNlciIsImlhdCI6MTUxNjIzOTAyMn0.INVALID_SIGNATURE_HERE"
   let assert Ok(jwk) = jwt.jwk_from_pem(rsa_public_pem)
   let result = jwt.verify(tampered_jwt, jwk)
   should.be_error(result)
@@ -175,7 +176,8 @@ pub fn ec_verify_claims_test() {
 }
 
 pub fn ec_invalid_signature_test() {
-  let tampered_jwt = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5ODc2NTQzMjEwIiwibmFtZSI6IkVDIFRlc3QgVXNlciIsImlhdCI6MTUxNjIzOTAyMn0.INVALID"
+  let tampered_jwt =
+    "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5ODc2NTQzMjEwIiwibmFtZSI6IkVDIFRlc3QgVXNlciIsImlhdCI6MTUxNjIzOTAyMn0.INVALID"
   let assert Ok(jwk) = jwt.jwk_from_pem(ec_public_pem)
   let result = jwt.verify(tampered_jwt, jwk)
   should.be_error(result)

@@ -1,6 +1,6 @@
 import gleam/option
-import pturso
 import parrot/dev
+import pturso
 
 pub fn parrot_to_pturso(p: dev.Param) -> pturso.Param {
   case p {
@@ -18,4 +18,3 @@ pub fn parrot_to_pturso(p: dev.Param) -> pturso.Param {
     dev.ParamNullable(option.None) -> pturso.Null
   }
 }
-

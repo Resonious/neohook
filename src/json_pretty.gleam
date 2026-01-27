@@ -1,14 +1,14 @@
-import termcolor
+import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
-import gleam/dict.{type Dict}
+import gleam/float
+import gleam/int
+import gleam/json
 import gleam/list
 import gleam/result
 import gleam/string
 import gleam/string_tree.{type StringTree}
-import gleam/int
-import gleam/float
-import gleam/json
+import termcolor
 
 pub type JsonValue {
   JString(String)
@@ -68,7 +68,8 @@ pub fn from_dynamic(d: Dynamic) -> Result(JsonValue, String) {
           |> result.map(dict.from_list)
           |> result.map(JObject)
         }
-        Error(_) -> Ok(JNull)  // Default to null for unrecognized types
+        Error(_) -> Ok(JNull)
+        // Default to null for unrecognized types
       }
     }
   }
@@ -76,11 +77,17 @@ pub fn from_dynamic(d: Dynamic) -> Result(JsonValue, String) {
 
 // ANSI color codes
 const color_reset = termcolor.reset
+
 const color_string = termcolor.green
+
 const color_number = termcolor.yellow
+
 const color_bool = termcolor.magenta
+
 const color_null = termcolor.gray
+
 const color_key = termcolor.cyan
+
 const color_bracket = termcolor.white
 
 fn make_indent(level: Int) -> String {

@@ -1,21 +1,21 @@
-import gleam/int
-import gleam/option
-import neohook/http_wrapper
-import termcolor
+import gleam/bit_array
 import gleam/bool.{guard}
 import gleam/bytes_tree
-import gleam/erlang/process
-import gleam/function
 import gleam/dict
 import gleam/dynamic/decode
+import gleam/erlang/process
+import gleam/function
+import gleam/http
+import gleam/int
 import gleam/json
 import gleam/list
-import gleam/result
-import gleam/bit_array
+import gleam/option
 import gleam/otp/actor
+import gleam/result
 import gleam/string_tree
-import gleam/http
 import json_pretty
+import neohook/http_wrapper
+import termcolor
 
 pub type Entry {
   Entry(
@@ -39,15 +39,11 @@ pub type Kind {
 }
 
 pub type Flags {
-  Flags(
-    persisted: Bool,
-  )
+  Flags(persisted: Bool)
 }
 
 pub type FlagsUpdate {
-  FlagsUpdate(
-    persisted: option.Option(Bool),
-  )
+  FlagsUpdate(persisted: option.Option(Bool))
 }
 
 pub fn flags_update_decoder() -> decode.Decoder(FlagsUpdate) {
@@ -56,21 +52,15 @@ pub fn flags_update_decoder() -> decode.Decoder(FlagsUpdate) {
 }
 
 pub fn flags_to_json(flags: Flags) -> json.Json {
-  json.object([
-    #("persisted", json.bool(flags.persisted))
-  ])
+  json.object([#("persisted", json.bool(flags.persisted))])
 }
 
 pub fn default_flags() -> Flags {
-  Flags(
-    persisted: False,
-  )
+  Flags(persisted: False)
 }
 
 pub fn parse_flags(bits: Int) -> Flags {
-  Flags(
-    persisted: {int.bitwise_and(bits, 1) == 1},
-  )
+  Flags(persisted: { int.bitwise_and(bits, 1) == 1 })
 }
 
 pub fn serialize_flags(flags: Flags) -> Int {
@@ -87,88 +77,96 @@ pub fn new(kind: Kind) {
   |> actor.start
 }
 
-fn send_sse_data(conn: http_wrapper.SSEConnection, data: String) -> Result(Nil, Nil) {
+fn send_sse_data(
+  conn: http_wrapper.SSEConnection,
+  data: String,
+) -> Result(Nil, Nil) {
   http_wrapper.send_sse_event(string_tree.from_string(data), to: conn)
 }
 
-fn send_sse_named_event(conn: http_wrapper.SSEConnection, name: String, data: String) -> Result(Nil, Nil) {
-  http_wrapper.send_sse_named_event(string_tree.from_string(data), name:, to: conn)
+fn send_sse_named_event(
+  conn: http_wrapper.SSEConnection,
+  name: String,
+  data: String,
+) -> Result(Nil, Nil) {
+  http_wrapper.send_sse_named_event(
+    string_tree.from_string(data),
+    name:,
+    to: conn,
+  )
 }
 
-pub fn handle(
-  state: Kind,
-  message: Message,
-) -> Kind {
+pub fn handle(state: Kind, message: Message) -> Kind {
   case message {
-    PushEntry(entry) -> case state {
-      Curl(subject, pid) -> {
-        use <- guard(when: !process.is_alive(pid), return: Dead)
+    PushEntry(entry) ->
+      case state {
+        Curl(subject, pid) -> {
+          use <- guard(when: !process.is_alive(pid), return: Dead)
 
-        let headers = list.map(
-          entry.headers,
-          fn(kv) {
-            let #(name, value) = kv
-            bytes_tree.new()
-            |> bytes_tree.append(bit_array.from_string(termcolor.green))
-            |> bytes_tree.append(bit_array.from_string(name))
-            |> bytes_tree.append(bit_array.from_string(termcolor.reset))
-            |> bytes_tree.append(bit_array.from_string(": "))
-            |> bytes_tree.append(bit_array.from_string(termcolor.yellow))
-            |> bytes_tree.append(bit_array.from_string(value))
-            |> bytes_tree.append(bit_array.from_string(termcolor.reset))
-            |> bytes_tree.append(bit_array.from_string("\n"))
+          let headers =
+            list.map(entry.headers, fn(kv) {
+              let #(name, value) = kv
+              bytes_tree.new()
+              |> bytes_tree.append(bit_array.from_string(termcolor.green))
+              |> bytes_tree.append(bit_array.from_string(name))
+              |> bytes_tree.append(bit_array.from_string(termcolor.reset))
+              |> bytes_tree.append(bit_array.from_string(": "))
+              |> bytes_tree.append(bit_array.from_string(termcolor.yellow))
+              |> bytes_tree.append(bit_array.from_string(value))
+              |> bytes_tree.append(bit_array.from_string(termcolor.reset))
+              |> bytes_tree.append(bit_array.from_string("\n"))
+            })
+            |> bytes_tree.concat
+
+          let body =
+            json.parse_bits(entry.body, decode.dynamic)
+            |> result.map_error(fn(_e) { "failed to decode" })
+            |> result.try(json_pretty.from_dynamic)
+            |> result.map(json_pretty.pretty_print)
+            |> result.map(bit_array.from_string)
+            |> result.unwrap(entry.body)
+            |> bytes_tree.from_bit_array
+
+          let total =
+            bytes_tree.from_string("\n")
+            |> bytes_tree.append_tree(headers)
+            |> bytes_tree.append_string("\n")
+            |> bytes_tree.append_tree(body)
+            |> bytes_tree.append_string("\n")
+            |> bytes_tree.to_bit_array
+
+          process.send(subject, total)
+
+          state
+        }
+
+        Sse(conn) -> {
+          let body_data = case bit_array.to_string(entry.body) {
+            Ok(utf8) -> utf8
+            Error(_) -> bit_array.base64_encode(entry.body, False)
           }
-        )
-        |> bytes_tree.concat
 
-        let body = json.parse_bits(entry.body, decode.dynamic)
-          |> result.map_error(fn(_e) { "failed to decode" })
-          |> result.try(json_pretty.from_dynamic)
-          |> result.map(json_pretty.pretty_print)
-          |> result.map(bit_array.from_string)
-          |> result.unwrap(entry.body)
-          |> bytes_tree.from_bit_array
+          let headers_data =
+            dict.from_list(entry.headers)
+            |> json.dict(function.identity, json.string)
+            |> json.to_string
 
-        let total = bytes_tree.from_string("\n")
-          |> bytes_tree.append_tree(headers)
-          |> bytes_tree.append_string("\n")
-          |> bytes_tree.append_tree(body)
-          |> bytes_tree.append_string("\n")
-          |> bytes_tree.to_bit_array
+          let res =
+            send_sse_named_event(conn, "headers", headers_data)
+            |> result.try(fn(_) { send_sse_data(conn, body_data) })
 
-        process.send(subject, total)
-
-        state
-      }
-
-      Sse(conn) -> {
-        let body_data = case bit_array.to_string(entry.body) {
-          Ok(utf8) -> utf8
-          Error(_) -> bit_array.base64_encode(entry.body, False)
+          case res {
+            Ok(_) -> state
+            Error(_) -> Dead
+          }
         }
 
-        let headers_data = dict.from_list(entry.headers)
-          |> json.dict(function.identity, json.string)
-          |> json.to_string
-
-        let res = send_sse_named_event(conn, "headers", headers_data)
-          |> result.try(fn(_) { send_sse_data(conn, body_data) })
-
-        case res {
-          Ok(_) -> state
-          Error(_) -> Dead
-        }
+        Dead -> Dead
       }
-
-      Dead -> Dead
-    }
   }
 }
 
-fn handle_message(
-  state: Kind,
-  message: Message,
-) -> actor.Next(Kind, Message) {
+fn handle_message(state: Kind, message: Message) -> actor.Next(Kind, Message) {
   case handle(state, message) {
     Dead -> actor.stop()
     x -> actor.continue(x)

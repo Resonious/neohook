@@ -1,33 +1,29 @@
-import neohook/counter
+import gleam/dict
+import gleam/erlang/process
 import gleam/int
-import gleam/result
 import gleam/list
 import gleam/option
-import gleam/erlang/process
-import gleam/dict
 import gleam/otp/actor
+import gleam/result
+import neohook/counter
 import pipe
 
 pub type Message {
   PushEntry(pipe_name: String, entry: pipe.Entry)
 
-  AddPipe(
-    name: String,
-    id: Int,
-    subject: process.Subject(pipe.Message),
-  )
+  AddPipe(name: String, id: Int, subject: process.Subject(pipe.Message))
 
   CleanPipe(name: String, remove_id: Int)
 }
 
-pub type Subject = process.Subject(Message)
+pub type Subject =
+  process.Subject(Message)
 
-type State = dict.Dict(
-  String,
-  dict.Dict(Int, process.Subject(pipe.Message)),
-)
+type State =
+  dict.Dict(String, dict.Dict(Int, process.Subject(pipe.Message)))
 
-pub type Pipemaster = actor.Started(process.Subject(Message))
+pub type Pipemaster =
+  actor.Started(process.Subject(Message))
 
 pub fn new(ctr: counter.Counter) -> Result(Pipemaster, actor.StartError) {
   actor.new(dict.new())
@@ -36,7 +32,7 @@ pub fn new(ctr: counter.Counter) -> Result(Pipemaster, actor.StartError) {
 }
 
 pub fn new_pipe_id() -> Int {
-  int.random(18446744073709551615)
+  int.random(18_446_744_073_709_551_615)
 }
 
 fn handle_message(
@@ -60,21 +56,17 @@ fn handle_message(
       dict.combine(
         state,
         dict.from_list([#(name, dict.from_list([#(id, subject)]))]),
-        dict.merge
+        dict.merge,
       )
       |> actor.continue
     }
 
     CleanPipe(name, remove_id) -> {
-      dict.upsert(
-        state,
-        name,
-        fn(subjects) {
-          subjects
-          |> option.lazy_unwrap(dict.new)
-          |> dict.delete(remove_id)
-        },
-      )
+      dict.upsert(state, name, fn(subjects) {
+        subjects
+        |> option.lazy_unwrap(dict.new)
+        |> dict.delete(remove_id)
+      })
       |> actor.continue
     }
   }

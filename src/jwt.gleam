@@ -1,8 +1,8 @@
-import gleam/string
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/json
 import gleam/result
+import gleam/string
 
 /// Opaque type representing a JWK (JSON Web Key)
 pub type Jwk
@@ -19,7 +19,8 @@ pub type JwtError {
 }
 
 pub fn jwk_from_string(pem_or_json: String) -> Result(Jwk, JwtError) {
-  let seems_like_pem = string.slice(pem_or_json, at_index: 0, length: 20)
+  let seems_like_pem =
+    string.slice(pem_or_json, at_index: 0, length: 20)
     |> string.contains("BEGIN")
 
   case seems_like_pem {
@@ -57,7 +58,10 @@ pub fn verify(jwt_string: String, jwk: Jwk) -> Result(Dynamic, JwtError)
 
 /// Verify a JWT and return a tuple of (header, claims) as Dynamic
 @external(erlang, "jwt_ffi", "jwt_verify_full")
-pub fn verify_full(jwt_string: String, jwk: Jwk) -> Result(#(Dynamic, Dynamic), JwtError)
+pub fn verify_full(
+  jwt_string: String,
+  jwk: Jwk,
+) -> Result(#(Dynamic, Dynamic), JwtError)
 
 /// Sign a payload to create a JWT
 @external(erlang, "jwt_ffi", "jwt_sign")

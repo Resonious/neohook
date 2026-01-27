@@ -1,31 +1,34 @@
-import jwt_test
-import shcribe
-import neohook/counter
-import gleam/function
-import gleam/list
-import gleam/result
-import gleam/json
-import gleam/dynamic/decode
-import migrations
-import gleam/string_tree
-import gleam/option.{Some}
-import gleam/erlang/process
-import gleam/string
-import gleeunit/should
-import gleam/bytes_tree
-import gleam/yielder
-import mist
-import gleam/http/response
+///////////////////////
+///////////////////////
+
 import gleam/bit_array
-import neohook/http_wrapper
-import gleam/http/request
+import gleam/bytes_tree
+import gleam/dynamic/decode
+import gleam/erlang/process
+import gleam/function
 import gleam/http
-import neohook
-import gulid
-import pipemaster
+import gleam/http/request
+import gleam/http/response
 import gleam/int
-import pturso
+import gleam/json
+import gleam/list
+import gleam/option.{Some}
+import gleam/result
+import gleam/string
+import gleam/string_tree
+import gleam/yielder
 import gleeunit
+import gleeunit/should
+import gulid
+import jwt_test
+import migrations
+import mist
+import neohook
+import neohook/counter
+import neohook/http_wrapper
+import pipemaster
+import pturso
+import shcribe
 
 pub fn main() -> Nil {
   delete_files_matching("test/db*")
@@ -36,36 +39,45 @@ pub fn curl_test() {
   let ctr = counter.new_memory()
   let assert Ok(master) = pipemaster.new(ctr)
   let db = turso_connection()
-  let state = neohook.AppState(
-    master: master.data,
-    ulid_to_string: gulid.to_string_function(),
-    ulid_from_string: gulid.from_string_function(),
-    db:,
-    self: default_peer(),
-    peers: [],
-  )
+  let state =
+    neohook.AppState(
+      master: master.data,
+      ulid_to_string: gulid.to_string_function(),
+      ulid_from_string: gulid.from_string_function(),
+      db:,
+      self: default_peer(),
+      peers: [],
+    )
 
   // Collect chunks via callback
   let chunk_subj = process.new_subject()
 
   // Start listening
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Get)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
-    |> request.set_body(http_wrapper.SimpleBody(
-      bit_array.from_string(""),
-      on_sse: no_sse,
-      on_chunk: fn(data) { process.send(chunk_subj, data) Ok(Nil) },
-    ))
+    |> request.set_body(
+      http_wrapper.SimpleBody(
+        bit_array.from_string(""),
+        on_sse: no_sse,
+        on_chunk: fn(data) {
+          process.send(chunk_subj, data)
+          Ok(Nil)
+        },
+      ),
+    )
 
-  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state)
+  let response.Response(status:, headers: _, body:) =
+    neohook.http_handler(req, state)
   should.equal(status, 200)
 
   let assert mist.Chunked = body
 
   // Send something
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
@@ -76,12 +88,16 @@ pub fn curl_test() {
       on_chunk: no_chunk,
     ))
 
-  let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state)
+  let response.Response(status:, headers: _, body: _) =
+    neohook.http_handler(req, state)
   should.equal(status, 200)
 
   // The welcome message should have come through
   let assert Ok(welcome) = process.receive(from: chunk_subj, within: 2000)
-  assert bit_array.starts_with(welcome, bit_array.from_string("You are listening on"))
+  assert bit_array.starts_with(
+    welcome,
+    bit_array.from_string("You are listening on"),
+  )
 
   // The message we sent should come through
   let assert Ok(message) = process.receive(from: chunk_subj, within: 2000)
@@ -103,42 +119,54 @@ pub fn sse_test() {
   let ctr = counter.new_memory()
   let assert Ok(master) = pipemaster.new(ctr)
   let db = turso_connection()
-  let state = neohook.AppState(
-    master: master.data,
-    ulid_to_string: gulid.to_string_function(),
-    ulid_from_string: gulid.from_string_function(),
-    db:,
-    self: default_peer(),
-    peers: [],
-  )
+  let state =
+    neohook.AppState(
+      master: master.data,
+      ulid_to_string: gulid.to_string_function(),
+      ulid_from_string: gulid.from_string_function(),
+      db:,
+      self: default_peer(),
+      peers: [],
+    )
 
   let subj = process.new_subject()
 
   // Start listening
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Get)
     |> request.set_path("/test/1")
     |> request.set_header("accept", "text/event-stream")
     |> request.set_body(http_wrapper.SimpleBody(
       bit_array.from_string(""),
-      on_sse: fn(x) { process.send(subj, x) Ok(Nil) },
+      on_sse: fn(x) {
+        process.send(subj, x)
+        Ok(Nil)
+      },
       on_chunk: no_chunk,
     ))
 
-  let response.Response(status:, headers: _, body:) = neohook.http_handler(req, state)
+  let response.Response(status:, headers: _, body:) =
+    neohook.http_handler(req, state)
   should.equal(status, 200)
 
   let assert mist.ServerSentEvents = body
 
   // Send something
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Message here"), on_sse: no_sse, on_chunk: no_chunk))
+    |> request.set_body(http_wrapper.SimpleBody(
+      bit_array.from_string("Message here"),
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
-  let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state)
+  let response.Response(status:, headers: _, body: _) =
+    neohook.http_handler(req, state)
   should.equal(status, 200)
 
   // The message we sent should have come in through the SSE connection
@@ -147,7 +175,10 @@ pub fn sse_test() {
 
   let assert Some("headers") = headers_event.name
   let received_headers = headers_event.data |> string_tree.to_string
-  assert string.contains(does: received_headers, contain: "\"x-test-header\":\"HITHERE\"")
+  assert string.contains(
+    does: received_headers,
+    contain: "\"x-test-header\":\"HITHERE\"",
+  )
 
   should.be_none(body_event.name)
   let received_body = body_event.data |> string_tree.to_string
@@ -158,64 +189,77 @@ pub fn persisted_test() {
   let ctr = counter.new_memory()
   let assert Ok(master) = pipemaster.new(ctr)
   let db = turso_connection()
-  let state = neohook.AppState(
-    master: master.data,
-    ulid_to_string: gulid.to_string_function(),
-    ulid_from_string: gulid.from_string_function(),
-    db:,
-    self: default_peer(),
-    peers: [],
-  )
+  let state =
+    neohook.AppState(
+      master: master.data,
+      ulid_to_string: gulid.to_string_function(),
+      ulid_from_string: gulid.from_string_function(),
+      db:,
+      self: default_peer(),
+      peers: [],
+    )
 
   // Send something
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("First"), on_sse: no_sse, on_chunk: no_chunk))
+    |> request.set_body(http_wrapper.SimpleBody(
+      bit_array.from_string("First"),
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
-  let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state)
+  let assert response.Response(status: 200, headers: _, body: _) =
+    neohook.http_handler(req, state)
 
   // It should *not* be saved to the DB
   let assert [] = fetch_entries(for: "test/1", from: state)
 
-  update_flags(
-    state,
-    "test/1",
-    persisted: True,
-  )
+  update_flags(state, "test/1", persisted: True)
 
   // Send something else
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Second"), on_sse: no_sse, on_chunk: no_chunk))
+    |> request.set_body(http_wrapper.SimpleBody(
+      bit_array.from_string("Second"),
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
-  let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state)
+  let assert response.Response(status: 200, headers: _, body: _) =
+    neohook.http_handler(req, state)
 
   // This one *should* be saved to the DB
-  let assert [Entry(body: <<"Second":utf8>>, ..)] = fetch_entries(for: "test/1", from: state)
+  let assert [Entry(body: <<"Second":utf8>>, ..)] =
+    fetch_entries(for: "test/1", from: state)
 
   // One more test to make sure disabling works:
-  update_flags(
-    state,
-    "test/1",
-    persisted: False,
-  )
-  let req = request.new()
+  update_flags(state, "test/1", persisted: False)
+  let req =
+    request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Third"), on_sse: no_sse, on_chunk: no_chunk))
+    |> request.set_body(http_wrapper.SimpleBody(
+      bit_array.from_string("Third"),
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
-  let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state)
+  let assert response.Response(status: 200, headers: _, body: _) =
+    neohook.http_handler(req, state)
 
   // Should still only be one saved entry
-  let assert [Entry(body: <<"Second":utf8>>, ..)] = fetch_entries(for: "test/1", from: state)
+  let assert [Entry(body: <<"Second":utf8>>, ..)] =
+    fetch_entries(for: "test/1", from: state)
 
   Nil
 }
@@ -227,55 +271,62 @@ pub fn peer_test() {
   let db1 = turso_connection()
   let db2 = turso_connection()
 
-  let peer1 = neohook.LocalPeer(
-    name: "peer1",
-    pipe_entry_subj: process.new_subject(),
-    db_sync_subj: process.new_subject(),
-  )
+  let peer1 =
+    neohook.LocalPeer(
+      name: "peer1",
+      pipe_entry_subj: process.new_subject(),
+      db_sync_subj: process.new_subject(),
+    )
 
-  let peer2 = neohook.LocalPeer(
-    name: "peer2",
-    pipe_entry_subj: process.new_subject(),
-    db_sync_subj: process.new_subject(),
-  )
+  let peer2 =
+    neohook.LocalPeer(
+      name: "peer2",
+      pipe_entry_subj: process.new_subject(),
+      db_sync_subj: process.new_subject(),
+    )
 
-  let state1 = neohook.AppState(
-    master: master1.data,
-    ulid_to_string: gulid.to_string_function(),
-    ulid_from_string: gulid.from_string_function(),
-    db: db1,
-    self: peer1,
-    peers: [peer2],
-  )
+  let state1 =
+    neohook.AppState(
+      master: master1.data,
+      ulid_to_string: gulid.to_string_function(),
+      ulid_from_string: gulid.from_string_function(),
+      db: db1,
+      self: peer1,
+      peers: [peer2],
+    )
 
-  let state2 = neohook.AppState(
-    master: master2.data,
-    ulid_to_string: gulid.to_string_function(),
-    ulid_from_string: gulid.from_string_function(),
-    db: db2,
-    self: peer2,
-    peers: [peer1],
-  )
+  let state2 =
+    neohook.AppState(
+      master: master2.data,
+      ulid_to_string: gulid.to_string_function(),
+      ulid_from_string: gulid.from_string_function(),
+      db: db2,
+      self: peer2,
+      peers: [peer1],
+    )
 
-  update_flags(
-    state1,
-    "test/1",
-    persisted: True,
-  )
+  update_flags(state1, "test/1", persisted: True)
 
   // Send something with state1
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Sent to 1"), on_sse: no_sse, on_chunk: no_chunk))
+    |> request.set_body(http_wrapper.SimpleBody(
+      bit_array.from_string("Sent to 1"),
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
-  let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state1)
+  let response.Response(status:, headers: _, body: _) =
+    neohook.http_handler(req, state1)
   should.equal(status, 200)
 
   // It should appear in its own DB
-  let assert [Entry(id: id_in_state1, body:)] = fetch_entries(for: "test/1", from: state1)
+  let assert [Entry(id: id_in_state1, body:)] =
+    fetch_entries(for: "test/1", from: state1)
 
   should.equal(body, bit_array.from_string("Sent to 1"))
 
@@ -285,7 +336,8 @@ pub fn peer_test() {
   process_db_syncs(peer2, db2)
   process_db_syncs(peer1, db1)
 
-  let assert [Entry(id: id_in_state2, body:)] = fetch_entries(for: "test/1", from: state2)
+  let assert [Entry(id: id_in_state2, body:)] =
+    fetch_entries(for: "test/1", from: state2)
 
   should.equal(body, bit_array.from_string("Sent to 1"))
   should.equal(id_in_state2, id_in_state1)
@@ -294,13 +346,19 @@ pub fn peer_test() {
   // (tests sync of persistence setting)
 
   // Send something with state2
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Bod"), on_sse: no_sse, on_chunk: no_chunk))
+    |> request.set_body(http_wrapper.SimpleBody(
+      bit_array.from_string("Bod"),
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
-  let assert response.Response(status: 200, headers: _, body: _) = neohook.http_handler(req, state2)
+  let assert response.Response(status: 200, headers: _, body: _) =
+    neohook.http_handler(req, state2)
 
   // It should appear in state2's DB too
   process_db_syncs(peer1, db1)
@@ -308,10 +366,8 @@ pub fn peer_test() {
   process_db_syncs(peer1, db1)
   process_db_syncs(peer2, db2)
 
-  let assert [Entry(
-    body: <<"Bod":utf8>>,
-    ..
-  ), ..] = fetch_entries(for: "test/1", from: state1)
+  let assert [Entry(body: <<"Bod":utf8>>, ..), ..] =
+    fetch_entries(for: "test/1", from: state1)
   Nil
 }
 
@@ -326,62 +382,74 @@ pub fn peer_bug_test() {
   let db1 = turso_connection()
   let db2 = turso_connection()
 
-  let peer1 = neohook.LocalPeer(
-    name: "peer1",
-    pipe_entry_subj: process.new_subject(),
-    db_sync_subj: process.new_subject(),
-  )
+  let peer1 =
+    neohook.LocalPeer(
+      name: "peer1",
+      pipe_entry_subj: process.new_subject(),
+      db_sync_subj: process.new_subject(),
+    )
 
-  let peer2 = neohook.LocalPeer(
-    name: "peer2",
-    pipe_entry_subj: process.new_subject(),
-    db_sync_subj: process.new_subject(),
-  )
+  let peer2 =
+    neohook.LocalPeer(
+      name: "peer2",
+      pipe_entry_subj: process.new_subject(),
+      db_sync_subj: process.new_subject(),
+    )
 
-  let state1 = neohook.AppState(
-    master: master1.data,
-    ulid_to_string: gulid.to_string_function(),
-    ulid_from_string: gulid.from_string_function(),
-    db: db1,
-    self: peer1,
-    peers: [peer2],
-  )
+  let state1 =
+    neohook.AppState(
+      master: master1.data,
+      ulid_to_string: gulid.to_string_function(),
+      ulid_from_string: gulid.from_string_function(),
+      db: db1,
+      self: peer1,
+      peers: [peer2],
+    )
 
-  let state2 = neohook.AppState(
-    master: master2.data,
-    ulid_to_string: gulid.to_string_function(),
-    ulid_from_string: gulid.from_string_function(),
-    db: db2,
-    self: peer2,
-    peers: [peer1],
-  )
+  let state2 =
+    neohook.AppState(
+      master: master2.data,
+      ulid_to_string: gulid.to_string_function(),
+      ulid_from_string: gulid.from_string_function(),
+      db: db2,
+      self: peer2,
+      peers: [peer1],
+    )
 
-  update_flags(
-    state1,
-    "test/1",
-    persisted: True,
-  )
+  update_flags(state1, "test/1", persisted: True)
 
   // Send something with peer1
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
     |> request.set_header("x-test-header", "HITHERE")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("Sent to 1"), on_sse: no_sse, on_chunk: no_chunk))
-  let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state1)
+    |> request.set_body(http_wrapper.SimpleBody(
+      bit_array.from_string("Sent to 1"),
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
+  let response.Response(status:, headers: _, body: _) =
+    neohook.http_handler(req, state1)
   should.equal(status, 200)
 
   // Suppose peer2 is down
   drop_db_syncs(peer2) |> should.not_equal(0)
 
   // Send something else with peer1
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/test/1")
     |> request.set_header("user-agent", "curl/8.0.0")
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string("new one"), on_sse: no_sse, on_chunk: no_chunk))
-  let response.Response(status:, headers: _, body: _) = neohook.http_handler(req, state1)
+    |> request.set_body(http_wrapper.SimpleBody(
+      bit_array.from_string("new one"),
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
+  let response.Response(status:, headers: _, body: _) =
+    neohook.http_handler(req, state1)
   should.equal(status, 200)
 
   // Bring peer2 back up
@@ -405,99 +473,141 @@ pub fn accounts_test() {
   let db1 = turso_connection()
   let db2 = turso_connection()
 
-  let peer1 = neohook.LocalPeer(
-    name: "peer1",
-    pipe_entry_subj: process.new_subject(),
-    db_sync_subj: process.new_subject(),
-  )
+  let peer1 =
+    neohook.LocalPeer(
+      name: "peer1",
+      pipe_entry_subj: process.new_subject(),
+      db_sync_subj: process.new_subject(),
+    )
 
-  let peer2 = neohook.LocalPeer(
-    name: "peer2",
-    pipe_entry_subj: process.new_subject(),
-    db_sync_subj: process.new_subject(),
-  )
+  let peer2 =
+    neohook.LocalPeer(
+      name: "peer2",
+      pipe_entry_subj: process.new_subject(),
+      db_sync_subj: process.new_subject(),
+    )
 
-  let state1 = neohook.AppState(
-    master: master1.data,
-    ulid_to_string: gulid.to_string_function(),
-    ulid_from_string: gulid.from_string_function(),
-    db: db1,
-    self: peer1,
-    peers: [peer2],
-  )
+  let state1 =
+    neohook.AppState(
+      master: master1.data,
+      ulid_to_string: gulid.to_string_function(),
+      ulid_from_string: gulid.from_string_function(),
+      db: db1,
+      self: peer1,
+      peers: [peer2],
+    )
 
-  let state2 = neohook.AppState(
-    master: master2.data,
-    ulid_to_string: gulid.to_string_function(),
-    ulid_from_string: gulid.from_string_function(),
-    db: db2,
-    self: peer2,
-    peers: [peer1],
-  )
+  let state2 =
+    neohook.AppState(
+      master: master2.data,
+      ulid_to_string: gulid.to_string_function(),
+      ulid_from_string: gulid.from_string_function(),
+      db: db2,
+      self: peer2,
+      peers: [peer1],
+    )
 
-  let handler1 = shcribe.wrap(neohook.http_handler(_, state1), with: shcribe_config())
-  let handler2 = shcribe.wrap(neohook.http_handler(_, state2), with: shcribe_config())
+  let handler1 =
+    shcribe.wrap(neohook.http_handler(_, state1), with: shcribe_config())
+  let handler2 =
+    shcribe.wrap(neohook.http_handler(_, state2), with: shcribe_config())
 
   // Create account
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/api/accounts")
-    |> request.set_body(http_wrapper.SimpleBody(<<>>, on_sse: no_sse, on_chunk: no_chunk))
+    |> request.set_body(http_wrapper.SimpleBody(
+      <<>>,
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
-  let assert response.Response(status: 201, body: mist.Bytes(resp), ..) = handler1(req)
+  let assert response.Response(status: 201, body: mist.Bytes(resp), ..) =
+    handler1(req)
   let decoder = decode.field("id", decode.string, decode.success)
-  let assert Ok(account_id) = resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
+  let assert Ok(account_id) =
+    resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
 
   // Add keys to account
-  let key_ids = [1, 2] |> list.map(fn(_) {
-    let req_body = jwt_test.ec_public_jwk_json |> bit_array.from_string
-    let req = request.new()
-      |> request.set_method(http.Post)
-      |> request.set_path("/api/accounts/" <> account_id <> "/keys")
-      |> request.set_body(http_wrapper.SimpleBody(req_body, on_sse: no_sse, on_chunk: no_chunk))
+  let key_ids =
+    [1, 2]
+    |> list.map(fn(_) {
+      let req_body = jwt_test.ec_public_jwk_json |> bit_array.from_string
+      let req =
+        request.new()
+        |> request.set_method(http.Post)
+        |> request.set_path("/api/accounts/" <> account_id <> "/keys")
+        |> request.set_body(http_wrapper.SimpleBody(
+          req_body,
+          on_sse: no_sse,
+          on_chunk: no_chunk,
+        ))
 
-    let assert response.Response(status: 201, body: mist.Bytes(resp), ..) = handler1(req)
-    let decoder = decode.field("id", decode.string, decode.success)
-    let assert Ok(key_id) = resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
-    key_id
-  })
+      let assert response.Response(status: 201, body: mist.Bytes(resp), ..) =
+        handler1(req)
+      let decoder = decode.field("id", decode.string, decode.success)
+      let assert Ok(key_id) =
+        resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
+      key_id
+    })
 
   // List keys
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Get)
     |> request.set_path("/api/accounts/" <> account_id <> "/keys")
-    |> request.set_body(http_wrapper.SimpleBody(<<>>, on_sse: no_sse, on_chunk: no_chunk))
+    |> request.set_body(http_wrapper.SimpleBody(
+      <<>>,
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
-  let assert response.Response(status: 200, body: mist.Bytes(resp), ..) = handler1(req)
-  let key_decoder = decode.field("id", decode.string, decode.success) |> decode.list
+  let assert response.Response(status: 200, body: mist.Bytes(resp), ..) =
+    handler1(req)
+  let key_decoder =
+    decode.field("id", decode.string, decode.success) |> decode.list
   let decoder = decode.field("keys", key_decoder, decode.success)
-  let assert Ok(fetched_key_ids) = resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
+  let assert Ok(fetched_key_ids) =
+    resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
   should.equal(key_ids, fetched_key_ids)
 
   // Delete key
   let assert [key1_id, key2_id] = key_ids
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Delete)
     |> request.set_path("/api/accounts/" <> account_id <> "/keys/" <> key2_id)
-    |> request.set_body(http_wrapper.SimpleBody(<<>>, on_sse: no_sse, on_chunk: no_chunk))
-  let assert response.Response(status: 204, body: mist.Bytes(_), ..) = handler1(req)
+    |> request.set_body(http_wrapper.SimpleBody(
+      <<>>,
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
+  let assert response.Response(status: 204, body: mist.Bytes(_), ..) =
+    handler1(req)
 
   // Deleted key should be gone from list
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Get)
     |> request.set_path("/api/accounts/" <> account_id <> "/keys")
-    |> request.set_body(http_wrapper.SimpleBody(<<>>, on_sse: no_sse, on_chunk: no_chunk))
+    |> request.set_body(http_wrapper.SimpleBody(
+      <<>>,
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
-  let assert response.Response(status: 200, body: mist.Bytes(resp), ..) = handler1(req)
-  let key_decoder = decode.field("id", decode.string, decode.success) |> decode.list
+  let assert response.Response(status: 200, body: mist.Bytes(resp), ..) =
+    handler1(req)
+  let key_decoder =
+    decode.field("id", decode.string, decode.success) |> decode.list
   let decoder = decode.field("keys", key_decoder, decode.success)
-  let assert Ok(fetched_key_ids) = resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
+  let assert Ok(fetched_key_ids) =
+    resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
   should.equal([key1_id], fetched_key_ids)
 }
 
-///////////////////////
 // Utility functions //
-///////////////////////
 
 type Entry {
   Entry(id: String, body: BitArray)
@@ -508,49 +618,65 @@ fn update_flags(
   pipe: String,
   persisted persisted: Bool,
 ) {
-  let req_body = json.object([
-    #("persisted", json.bool(persisted)),
-  ])
+  let req_body =
+    json.object([
+      #("persisted", json.bool(persisted)),
+    ])
     |> json.to_string
     |> bit_array.from_string
 
-  let handler = shcribe.wrap(neohook.http_handler(_, state), with: shcribe_config())
+  let handler =
+    shcribe.wrap(neohook.http_handler(_, state), with: shcribe_config())
 
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/api/pipe/settings")
     |> request.set_query([#("pipe", pipe)])
-    |> request.set_body(http_wrapper.SimpleBody(req_body, on_sse: no_sse, on_chunk: no_chunk))
+    |> request.set_body(http_wrapper.SimpleBody(
+      req_body,
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
   let response.Response(status:, ..) = handler(req)
   should.equal(status, 204)
 }
 
 fn fetch_entries(from state: neohook.AppState, for pipe: String) -> List(Entry) {
-  let req = request.new()
+  let req =
+    request.new()
     |> request.set_method(http.Get)
     |> request.set_path("/api/pipe")
     |> request.set_query([#("name", pipe)])
-    |> request.set_body(http_wrapper.SimpleBody(bit_array.from_string(""), on_sse: no_sse, on_chunk: no_chunk))
+    |> request.set_body(http_wrapper.SimpleBody(
+      bit_array.from_string(""),
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
 
-  let handler = shcribe.wrap(neohook.http_handler(_, state), with: shcribe_config())
+  let handler =
+    shcribe.wrap(neohook.http_handler(_, state), with: shcribe_config())
 
   let response.Response(status:, headers: _, body:) = handler(req)
   should.equal(status, 200)
 
   let assert mist.Bytes(body) = body
-  let entries_decoder = {
-    use id <- decode.field("id", decode.string)
-    use body <- decode.field("body", decode.bit_array)
-    decode.success(Entry(id:, body:))
-  } |> decode.list
+  let entries_decoder =
+    {
+      use id <- decode.field("id", decode.string)
+      use body <- decode.field("body", decode.bit_array)
+      decode.success(Entry(id:, body:))
+    }
+    |> decode.list
 
   let decoder = {
     use entries <- decode.field("entries", entries_decoder)
     decode.success(entries)
   }
 
-  let assert Ok(result) = json.parse_bits(bytes_tree.to_bit_array(body), decoder)
+  let assert Ok(result) =
+    json.parse_bits(bytes_tree.to_bit_array(body), decoder)
   result
 }
 
@@ -572,7 +698,7 @@ fn shcribe_config() -> shcribe.Config(http_wrapper.Body, mist.ResponseData) {
 
 fn turso_connection() -> pturso.Connection {
   let assert Ok(turso) = pturso.start()
-  let db_id = int.random(999999) |> int.to_string
+  let db_id = int.random(999_999) |> int.to_string
   let conn = pturso.connect(turso, "test/db" <> db_id, log_with: fn(_) { Nil })
   let assert Ok(_) = migrations.migrate(conn, migrations.all_migrations())
   conn
@@ -591,17 +717,17 @@ fn delete_files_matching(pattern: String) -> Nil
 
 fn process_db_syncs(peer: neohook.Peer, db: pturso.Connection) -> Int {
   yielder.repeatedly(fn() { neohook.peer_receive_db_sync(peer, within: 100) })
-    |> yielder.take_while(result.is_ok)
-    |> yielder.filter_map(function.identity)
-    |> yielder.map(neohook.db_receive_loop_iter(_, db, peer))
-    |> yielder.to_list
-    |> list.length
+  |> yielder.take_while(result.is_ok)
+  |> yielder.filter_map(function.identity)
+  |> yielder.map(neohook.db_receive_loop_iter(_, db, peer))
+  |> yielder.to_list
+  |> list.length
 }
 
 fn drop_db_syncs(peer: neohook.Peer) -> Int {
   yielder.repeatedly(fn() { neohook.peer_receive_db_sync(peer, within: 100) })
-    |> yielder.take_while(result.is_ok)
-    |> yielder.filter_map(function.identity)
-    |> yielder.to_list
-    |> list.length
+  |> yielder.take_while(result.is_ok)
+  |> yielder.filter_map(function.identity)
+  |> yielder.to_list
+  |> list.length
 }

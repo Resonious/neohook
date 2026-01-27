@@ -1,8 +1,8 @@
-import gleam/string
-import gleam/list
-import gleam/set
 import gleam/dynamic/decode
+import gleam/list
 import gleam/result.{try}
+import gleam/set
+import gleam/string
 import pturso
 
 /// Add new migrations to the end of this list.
@@ -12,7 +12,9 @@ import pturso
 /// already has run.
 pub fn all_migrations() -> List(#(String, String)) {
   [
-    #("create pipe entries", "
+    #(
+      "create pipe entries",
+      "
       CREATE TABLE pipe_entries (
         id BLOB PRIMARY KEY,
         node TEXT NOT NULL,
@@ -27,9 +29,12 @@ pub fn all_migrations() -> List(#(String, String)) {
 
       CREATE INDEX pipe_entries_node
       ON pipe_entries (node, id);
-    "),
+    ",
+    ),
 
-    #("create pipe settings", "
+    #(
+      "create pipe settings",
+      "
       CREATE TABLE pipe_settings (
         id BLOB PRIMARY KEY,
         node TEXT NOT NULL,
@@ -42,13 +47,19 @@ pub fn all_migrations() -> List(#(String, String)) {
 
       CREATE INDEX pipe_settings_node
       ON pipe_settings (node, id);
-    "),
+    ",
+    ),
 
-    #("add sender to pipe entries", "
+    #(
+      "add sender to pipe entries",
+      "
       ALTER TABLE pipe_entries ADD COLUMN sender TEXT;
-    "),
+    ",
+    ),
 
-    #("create accounts and keys", "
+    #(
+      "create accounts and keys",
+      "
       CREATE TABLE accounts (
         id BLOB NOT NULL,
         node TEXT NOT NULL,
@@ -77,7 +88,8 @@ pub fn all_migrations() -> List(#(String, String)) {
 
       CREATE INDEX account_keys_account_id
       ON account_keys (account_id, id, updated_at);
-    "),
+    ",
+    ),
   ]
 }
 
@@ -87,18 +99,16 @@ pub fn all_migrations() -> List(#(String, String)) {
 /// 1. List of successful migrations
 /// 2. Name of migration that failed
 /// 3. The error that occurred
-pub fn migrate(
-  conn: pturso.Connection,
-  migrations: List(#(String, String)),
-) {
-  use _ <- try(pturso.exec(
-    "CREATE TABLE IF NOT EXISTS migrations (
+pub fn migrate(conn: pturso.Connection, migrations: List(#(String, String))) {
+  use _ <- try(
+    pturso.exec(
+      "CREATE TABLE IF NOT EXISTS migrations (
         name TEXT PRIMARY KEY,
         applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )",
-    on: conn,
-  )
-    |> result.map_error(fn(e) { #([], "init1", e) })
+      on: conn,
+    )
+    |> result.map_error(fn(e) { #([], "init1", e) }),
   )
 
   let decoder = {
@@ -106,14 +116,15 @@ pub fn migrate(
     decode.success(name)
   }
 
-  use already_run <- try(pturso.query(
-    "SELECT name FROM migrations",
-    on: conn,
-    with: [],
-    expecting: decoder,
-  )
+  use already_run <- try(
+    pturso.query(
+      "SELECT name FROM migrations",
+      on: conn,
+      with: [],
+      expecting: decoder,
+    )
     |> result.map_error(fn(e) { #([], "init2", e) })
-    |> result.map(set.from_list)
+    |> result.map(set.from_list),
   )
 
   let save_ran = fn(ran: List(String)) {
@@ -121,15 +132,17 @@ pub fn migrate(
       [] -> Nil
 
       [_, ..] -> {
-        let placeholders = list.map(ran, fn(_) { "(?)" })
+        let placeholders =
+          list.map(ran, fn(_) { "(?)" })
           |> string.join(", ")
         let sql = "INSERT INTO migrations (name) VALUES " <> placeholders
-        let assert Ok(_) = pturso.query(
-          sql,
-          on: conn,
-          with: list.map(ran, pturso.String),
-          expecting: decode.success(Nil),
-        )
+        let assert Ok(_) =
+          pturso.query(
+            sql,
+            on: conn,
+            with: list.map(ran, pturso.String),
+            expecting: decode.success(Nil),
+          )
         Nil
       }
     }
@@ -144,6 +157,12 @@ pub fn migrate(
       Error(e) -> list.Stop(Error(#(result.unwrap(ran, []), name, e)))
     }
   })
-  |> result.map(fn(x) { save_ran(x) x })
-  |> result.map_error(fn(x) { save_ran(x.0) x })
+  |> result.map(fn(x) {
+    save_ran(x)
+    x
+  })
+  |> result.map_error(fn(x) {
+    save_ran(x.0)
+    x
+  })
 }
