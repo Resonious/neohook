@@ -572,6 +572,29 @@ pub fn accounts_test() {
     resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
   should.equal(fetched_key_ids, key_ids)
 
+  // List keys on peer 2
+  process_db_syncs(peer2, db2)
+  process_db_syncs(peer1, db1)
+
+  let req =
+    request.new()
+    |> request.set_method(http.Get)
+    |> request.set_path("/api/accounts/" <> account_id <> "/keys")
+    |> request.set_body(http_wrapper.SimpleBody(
+      <<>>,
+      on_sse: no_sse,
+      on_chunk: no_chunk,
+    ))
+
+  let assert response.Response(status: 200, body: mist.Bytes(resp), ..) =
+    handler2(req)
+  let key_decoder =
+    decode.field("id", decode.string, decode.success) |> decode.list
+  let decoder = decode.field("keys", key_decoder, decode.success)
+  let assert Ok(fetched_key_ids) =
+    resp |> bytes_tree.to_bit_array |> json.parse_bits(decoder)
+  should.equal(fetched_key_ids, key_ids)
+
   // Delete key
   let assert [key1_id, key2_id] = key_ids
   let req =

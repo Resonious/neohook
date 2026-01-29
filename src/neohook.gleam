@@ -1009,8 +1009,8 @@ pub fn forward_pipe_entries_forever(master: pipemaster.Pipemaster) {
 }
 
 pub type SyncHint {
-  LatestID(BitArray)
-  NoID
+  GiveMeAllIDsAfter(BitArray)
+  GiveMeAllUpdatedAtsAfter(Int)
   ErrorRetrievingID
 }
 
@@ -1024,29 +1024,57 @@ pub type DbSyncMessage {
     who: Peer,
     latest_pipe_entry_id: SyncHint,
     latest_pipe_settings_id: SyncHint,
+    latest_account_updated_at: SyncHint,
   )
 
   DbSyncExec(sql: String, with: List(pturso.Param))
 }
 
-fn sync_hint_from_result(
+fn id_sync_hint_from_result(
   input: Result(dict.Dict(String, BitArray), Nil),
   key: String,
 ) -> SyncHint {
   case result.map(input, dict.get(_, key)) {
-    Ok(Ok(value)) -> LatestID(value)
-    Ok(Error(Nil)) -> NoID
+    Ok(Ok(value)) -> GiveMeAllIDsAfter(value)
+    Ok(Error(Nil)) ->
+      GiveMeAllIDsAfter(gulid.from_parts(0, 0) |> gulid.to_bitarray)
     Error(Nil) -> ErrorRetrievingID
   }
 }
 
-fn latest_x_by_node(table: String, on db: pturso.Connection) {
+fn updated_at_sync_hint_from_result(
+  input: Result(dict.Dict(String, Int), Nil),
+  key: String,
+) -> SyncHint {
+  case result.map(input, dict.get(_, key)) {
+    Ok(Ok(value)) -> GiveMeAllUpdatedAtsAfter(value)
+    Ok(Error(Nil)) -> GiveMeAllUpdatedAtsAfter(0)
+    Error(Nil) -> ErrorRetrievingID
+  }
+}
+
+fn id_latest_x_by_node(table: String, on db: pturso.Connection) {
   let expecting = {
     use node <- decode.field(0, decode.string)
     use latest_id <- decode.field(1, decode.bit_array)
     decode.success(#(node, latest_id))
   }
   let sql = "select node, max(id) as latest_id
+    from " <> table <> "
+    group by node"
+
+  pturso.query(sql, on: db, with: [], expecting:)
+  |> result.lazy_unwrap(list.new)
+  |> dict.from_list
+}
+
+fn updated_at_latest_x_by_node(table: String, on db: pturso.Connection) {
+  let expecting = {
+    use node <- decode.field(0, decode.string)
+    use latest_updated_at <- decode.field(1, decode.int)
+    decode.success(#(node, latest_updated_at))
+  }
+  let sql = "select node, max(updated_at) as latest_updated_at
     from " <> table <> "
     group by node"
 
@@ -1062,18 +1090,25 @@ pub fn tell_nodes_where_were_at(
 ) {
   let pipe_entries_subj = process.new_subject()
   process.spawn(fn() {
-    latest_x_by_node("pipe_entries", on: db)
+    id_latest_x_by_node("pipe_entries", on: db)
     |> process.send(pipe_entries_subj, _)
   })
 
   let pipe_settings_subj = process.new_subject()
   process.spawn(fn() {
-    latest_x_by_node("pipe_settings", on: db)
+    id_latest_x_by_node("pipe_settings", on: db)
     |> process.send(pipe_settings_subj, _)
+  })
+
+  let accounts_subj = process.new_subject()
+  process.spawn(fn() {
+    updated_at_latest_x_by_node("accounts", on: db)
+    |> process.send(accounts_subj, _)
   })
 
   let pipe_entries = process.receive(pipe_entries_subj, 1000)
   let pipe_settings = process.receive(pipe_settings_subj, 1000)
+  let accounts = process.receive(accounts_subj, 1000)
 
   let all =
     peers
@@ -1083,9 +1118,16 @@ pub fn tell_nodes_where_were_at(
         peer_string,
         DbSyncHint(
           who: me,
-          latest_pipe_entry_id: sync_hint_from_result(pipe_entries, peer_string),
-          latest_pipe_settings_id: sync_hint_from_result(
+          latest_pipe_entry_id: id_sync_hint_from_result(
+            pipe_entries,
+            peer_string,
+          ),
+          latest_pipe_settings_id: id_sync_hint_from_result(
             pipe_settings,
+            peer_string,
+          ),
+          latest_account_updated_at: updated_at_sync_hint_from_result(
+            accounts,
             peer_string,
           ),
         ),
@@ -1120,13 +1162,15 @@ fn process_sync_hint(
   from me: Peer,
   to who: Peer,
 ) {
-  let latest_id = case hint {
-    LatestID(id) -> Ok(id)
-    NoID -> gulid.from_parts(0, 0) |> gulid.to_bitarray |> Ok
+  let latest = case hint {
+    GiveMeAllIDsAfter(id) -> Ok(#("id", id |> pturso.Blob))
+    GiveMeAllUpdatedAtsAfter(updated_at) ->
+      Ok(#("updated_at", updated_at |> pturso.Int))
     ErrorRetrievingID -> Error(Nil)
   }
 
-  use latest_id <- expect(latest_id, or_return: fn() { Nil })
+  use latest <- expect(latest, or_return: fn() { Nil })
+  let #(key_field, key_value) = latest
 
   let sql =
     string_tree.from_string("SELECT ")
@@ -1138,17 +1182,17 @@ fn process_sync_hint(
     |> string_tree.append(" FROM ")
     |> string_tree.append(table)
     |> string_tree.append(
-      " WHERE node = ? AND id > ? ORDER BY id ASC LIMIT 100",
+      " WHERE node = ? AND " <> key_field <> " > ? ORDER BY id ASC LIMIT 100",
     )
     |> string_tree.to_string
 
-  let with = [
+  let query_params = [
     peer_node(me) |> pturso.String,
-    latest_id |> pturso.Blob,
+    key_value,
   ]
 
   let assert Ok(values) =
-    pturso.query(sql, on: db, with:, expecting: decode.dynamic)
+    pturso.query(sql, on: db, with: query_params, expecting: decode.dynamic)
 
   case values {
     [_, ..] -> {
@@ -1229,7 +1273,12 @@ pub fn db_receive_loop_iter(
       tell_nodes_where_were_at(db, [who], me)
     }
 
-    DbSyncHint(who, latest_pipe_entry_id, latest_pipe_settings_id) -> {
+    DbSyncHint(
+      who,
+      latest_pipe_entry_id,
+      latest_pipe_settings_id,
+      latest_account_updated_at,
+    ) -> {
       let subj = process.new_subject()
 
       process.spawn_unlinked(fn() {
@@ -1269,6 +1318,22 @@ pub fn db_receive_loop_iter(
             #("node", decode.map(decode.string, pturso.String)),
             #("namespace", decode.map(decode.string, pturso.String)),
             #("flags", decode.map(decode.int, pturso.Int)),
+          ],
+          on: db,
+          from: me,
+          to: who,
+        )
+        process.send(subj, Nil)
+      })
+
+      process.spawn_unlinked(fn() {
+        process_sync_hint(
+          latest_account_updated_at,
+          for: "accounts",
+          with: [
+            #("id", decode.map(decode.bit_array, pturso.Blob)),
+            #("node", decode.map(decode.string, pturso.String)),
+            #("updated_at", decode.map(decode.int, pturso.Int)),
           ],
           on: db,
           from: me,
