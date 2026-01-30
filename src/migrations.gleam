@@ -42,7 +42,7 @@ pub fn all_migrations() -> List(#(String, String)) {
         flags INTEGER NOT NULL DEFAULT 0
       );
 
-      CREATE INDEX pipe_settings_pipe
+      CREATE UNIQUE INDEX pipe_settings_pipe
       ON pipe_settings (namespace, id);
 
       CREATE INDEX pipe_settings_node

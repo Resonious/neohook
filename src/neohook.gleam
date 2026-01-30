@@ -373,7 +373,7 @@ fn redirect(to location: String) {
 /// Returns a function so that it can be used nicely with lazy_guard
 fn bad_request(because reason: String) {
   fn() {
-    response.new(301)
+    response.new(400)
     |> response.set_header("content-type", "application/json")
     |> response.set_body(mist.Bytes(
       json.object([#("error", json.string(reason))])
@@ -542,19 +542,27 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
     }
 
     http.Post, ["pipe", "settings"] -> {
-      let pipe_key = "pipe"
-      let pipe =
+      let namespace_key = "namespace"
+      let namespace =
         req.query
         |> option.unwrap("")
         |> uri.parse_query
         |> result.unwrap([])
-        |> list.key_find(pipe_key)
+        |> list.key_find(namespace_key)
 
-      use pipe <- expect(
-        pipe,
-        or_return: bad_request(because: "missing `?" <> pipe_key <> "=...`"),
+      use namespace <- expect(
+        namespace,
+        or_return: bad_request(because: "missing `?" <> namespace_key <> "=...`"),
       )
-      let namespace = pipe_namespace(of: pipe)
+
+      let namespace_is_ok = case string.contains(does: namespace, contain: "/") {
+        False -> Ok(Nil)
+        True -> Error(Nil)
+      }
+      use _ <- expect(
+        namespace_is_ok,
+        or_return: bad_request(because: "invalid namespace")
+      )
 
       let body = http_wrapper.read_body(req, 1024 * 8)
       use <- lazy_guard(

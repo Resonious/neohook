@@ -218,7 +218,7 @@ pub fn persisted_test() {
   // It should *not* be saved to the DB
   let assert [] = fetch_entries(for: "test/1", from: state)
 
-  update_flags(state, "test/1", persisted: True)
+  update_flags(state, "test", persisted: True)
 
   // Send something else
   let req =
@@ -241,7 +241,7 @@ pub fn persisted_test() {
     fetch_entries(for: "test/1", from: state)
 
   // One more test to make sure disabling works:
-  update_flags(state, "test/1", persisted: False)
+  update_flags(state, "test", persisted: False)
   let req =
     request.new()
     |> request.set_method(http.Post)
@@ -305,7 +305,7 @@ pub fn peer_test() {
       peers: [peer1],
     )
 
-  update_flags(state1, "test/1", persisted: True)
+  update_flags(state1, "test", persisted: True)
 
   // Send something with state1
   let req =
@@ -416,7 +416,7 @@ pub fn peer_bug_test() {
       peers: [peer1],
     )
 
-  update_flags(state1, "test/1", persisted: True)
+  update_flags(state1, "test", persisted: True)
 
   // Send something with peer1
   let req =
@@ -640,7 +640,7 @@ type Entry {
 
 fn update_flags(
   state: neohook.AppState,
-  pipe: String,
+  namespace: String,
   persisted persisted: Bool,
 ) {
   let req_body =
@@ -657,7 +657,7 @@ fn update_flags(
     request.new()
     |> request.set_method(http.Post)
     |> request.set_path("/api/pipe/settings")
-    |> request.set_query([#("pipe", pipe)])
+    |> request.set_query([#("namespace", namespace)])
     |> request.set_body(http_wrapper.SimpleBody(
       req_body,
       on_sse: no_sse,
