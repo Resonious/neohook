@@ -66,7 +66,7 @@ pub fn all_migrations() -> List(#(String, String)) {
         updated_at INTEGER NOT NULL
       );
 
-      CREATE INDEX accounts_updated_at
+      CREATE UNIQUE INDEX accounts_updated_at
       ON accounts (id, updated_at);
 
       CREATE INDEX accounts_node
@@ -83,7 +83,7 @@ pub fn all_migrations() -> List(#(String, String)) {
       CREATE INDEX account_keys_node
       ON account_keys (node, updated_at);
 
-      CREATE INDEX account_keys_updated_at
+      CREATE UNIQUE INDEX account_keys_updated_at
       ON account_keys (id, updated_at);
 
       CREATE INDEX account_keys_account_id

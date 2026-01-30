@@ -300,17 +300,10 @@ fn send_to_pipe(req: Request, pipe_name: String, state: AppState) -> Response {
         // This means the pipe *was* marked as persisted, and the insert
         // was successful, so we need to tell peers about the new data.
         Ok([sql.InsertPipeEntry(col_0: 1)]) ->
-          state.peers
-          |> list.each(fn(peer) {
-            logging.log(logging.Info, "sending to " <> peer_node(peer))
-            peer_send_db_sync(peer, DbSyncNewEntry(who: state.self))
-          })
+          tell_nodes_about_new_data(state.self, state.peers)
 
         // Something went horribly wrong here
-        Error(error) -> {
-          echo error
-          Nil
-        }
+        Error(error) -> log_error(error)
 
         // No insert was performed
         _ -> Nil
@@ -610,12 +603,15 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
       case
         pturso.query(sql, on: state.db, with:, expecting: decode.success(Nil))
       {
-        Ok(_) ->
+        Ok(_) -> {
+          tell_nodes_about_new_data(state.self, state.peers)
+
           response.new(204)
           |> response.set_header("content-type", "application/json")
           |> response.set_body(mist.Bytes(bytes_tree.new()))
+        }
         Error(e) -> {
-          echo e
+          log_error(e)
           response.new(500)
           |> response.set_header("content-type", "application/json")
           |> response.set_body(
@@ -640,6 +636,8 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         pturso.query(sql, on: state.db, with:, expecting: decode.success(Nil))
       {
         Ok(_) -> {
+          tell_nodes_about_new_data(state.self, state.peers)
+
           let payload =
             json.object([
               #("id", id |> state.ulid_to_string |> json.string),
@@ -652,7 +650,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         }
 
         Error(e) -> {
-          echo e
+          log_error(e)
           response.new(500)
           |> response.set_header("content-type", "application/json")
           |> response.set_body(
@@ -691,6 +689,8 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         pturso.query(sql, on: state.db, with:, expecting: decode.success(Nil))
       {
         Ok(_) -> {
+          tell_nodes_about_new_data(state.self, state.peers)
+
           let payload =
             json.object([
               #("id", id |> state.ulid_to_string |> json.string),
@@ -703,7 +703,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         }
 
         Error(e) -> {
-          echo e
+          log_error(e)
           response.new(500)
           |> response.set_header("content-type", "application/json")
           |> response.set_body(
@@ -738,12 +738,14 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         pturso.query(sql, on: state.db, with:, expecting: decode.success(Nil))
       {
         Ok(_) -> {
+          tell_nodes_about_new_data(state.self, state.peers)
+
           response.new(204)
           |> response.set_body(mist.Bytes(bytes_tree.from_string("")))
         }
 
         Error(e) -> {
-          echo e
+          log_error(e)
           response.new(500)
           |> response.set_header("content-type", "application/json")
           |> response.set_body(
@@ -798,7 +800,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         }
 
         Error(e) -> {
-          echo e
+          log_error(e)
           response.new(500)
           |> response.set_header("content-type", "application/json")
           |> response.set_body(
@@ -816,6 +818,10 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
       )
     }
   }
+}
+
+fn log_error(error: e) {
+  logging.log(logging.Error, "ERROR: " <> string.inspect(error))
 }
 
 pub fn http_handler(req: Request, state: AppState) -> Response {
@@ -1275,6 +1281,11 @@ fn process_sync_hint(
   }
 }
 
+pub fn tell_nodes_about_new_data(me: Peer, peers: List(Peer)) {
+  peers
+  |> list.each(fn(peer) { peer_send_db_sync(peer, DbSyncNewEntry(who: me)) })
+}
+
 pub fn db_receive_loop_iter(
   message: DbSyncMessage,
   db: pturso.Connection,
@@ -1373,7 +1384,10 @@ pub fn db_receive_loop_iter(
             #("node", decode.map(decode.string, pturso.String)),
             #("updated_at", decode.map(decode.int, pturso.Int)),
             #("account_id", decode.map(decode.bit_array, pturso.Blob)),
-            #("jwk", decode.map(decode.bit_array, pturso.Blob) |> pturso.nullable),
+            #(
+              "jwk",
+              decode.map(decode.bit_array, pturso.Blob) |> pturso.nullable,
+            ),
           ],
           on: db,
           from: me,
@@ -1383,7 +1397,8 @@ pub fn db_receive_loop_iter(
       })
 
       // Wait a little bit for each to finish
-      list.range(1, count) |> list.each(fn(_) { process.receive(subj, within: 500) })
+      list.range(1, count)
+      |> list.each(fn(_) { process.receive(subj, within: 500) })
 
       Nil
     }
@@ -1526,7 +1541,7 @@ pub fn main() {
       case https_start {
         Ok(Ok(_)) -> Nil
         Ok(Error(failed_to_start)) -> {
-          echo failed_to_start
+          log_error(failed_to_start)
           panic as "failed to start https server"
         }
         Error(config_failed) ->
