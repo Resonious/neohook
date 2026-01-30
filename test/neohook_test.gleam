@@ -575,6 +575,8 @@ pub fn accounts_test() {
   // List keys on peer 2
   process_db_syncs(peer2, db2)
   process_db_syncs(peer1, db1)
+  process_db_syncs(peer2, db2)
+  process_db_syncs(peer1, db1)
 
   let req =
     request.new()

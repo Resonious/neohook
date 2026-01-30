@@ -1025,6 +1025,7 @@ pub type DbSyncMessage {
     latest_pipe_entry_id: SyncHint,
     latest_pipe_settings_id: SyncHint,
     latest_account_updated_at: SyncHint,
+    latest_account_key_updated_at: SyncHint,
   )
 
   DbSyncExec(sql: String, with: List(pturso.Param))
@@ -1053,7 +1054,7 @@ fn updated_at_sync_hint_from_result(
   }
 }
 
-fn id_latest_x_by_node(table: String, on db: pturso.Connection) {
+fn latest_id_by_node(table: String, on db: pturso.Connection) {
   let expecting = {
     use node <- decode.field(0, decode.string)
     use latest_id <- decode.field(1, decode.bit_array)
@@ -1068,7 +1069,7 @@ fn id_latest_x_by_node(table: String, on db: pturso.Connection) {
   |> dict.from_list
 }
 
-fn updated_at_latest_x_by_node(table: String, on db: pturso.Connection) {
+fn latest_updated_at_by_node(table: String, on db: pturso.Connection) {
   let expecting = {
     use node <- decode.field(0, decode.string)
     use latest_updated_at <- decode.field(1, decode.int)
@@ -1090,25 +1091,32 @@ pub fn tell_nodes_where_were_at(
 ) {
   let pipe_entries_subj = process.new_subject()
   process.spawn(fn() {
-    id_latest_x_by_node("pipe_entries", on: db)
+    latest_id_by_node("pipe_entries", on: db)
     |> process.send(pipe_entries_subj, _)
   })
 
   let pipe_settings_subj = process.new_subject()
   process.spawn(fn() {
-    id_latest_x_by_node("pipe_settings", on: db)
+    latest_id_by_node("pipe_settings", on: db)
     |> process.send(pipe_settings_subj, _)
   })
 
   let accounts_subj = process.new_subject()
   process.spawn(fn() {
-    updated_at_latest_x_by_node("accounts", on: db)
+    latest_updated_at_by_node("accounts", on: db)
     |> process.send(accounts_subj, _)
+  })
+
+  let account_keys_subj = process.new_subject()
+  process.spawn(fn() {
+    latest_updated_at_by_node("account_keys", on: db)
+    |> process.send(account_keys_subj, _)
   })
 
   let pipe_entries = process.receive(pipe_entries_subj, 1000)
   let pipe_settings = process.receive(pipe_settings_subj, 1000)
   let accounts = process.receive(accounts_subj, 1000)
+  let account_keys = process.receive(account_keys_subj, 1000)
 
   let all =
     peers
@@ -1128,6 +1136,10 @@ pub fn tell_nodes_where_were_at(
           ),
           latest_account_updated_at: updated_at_sync_hint_from_result(
             accounts,
+            peer_string,
+          ),
+          latest_account_key_updated_at: updated_at_sync_hint_from_result(
+            account_keys,
             peer_string,
           ),
         ),
@@ -1278,9 +1290,12 @@ pub fn db_receive_loop_iter(
       latest_pipe_entry_id,
       latest_pipe_settings_id,
       latest_account_updated_at,
+      latest_account_key_updated_at,
     ) -> {
       let subj = process.new_subject()
+      let count = 0
 
+      let count = count + 1
       process.spawn_unlinked(fn() {
         process_sync_hint(
           latest_pipe_entry_id,
@@ -1301,6 +1316,10 @@ pub fn db_receive_loop_iter(
               "body",
               decode.map(decode.bit_array, pturso.Blob) |> pturso.nullable,
             ),
+            #(
+              "sender",
+              decode.map(decode.string, pturso.String) |> pturso.nullable,
+            ),
           ],
           on: db,
           from: me,
@@ -1309,6 +1328,7 @@ pub fn db_receive_loop_iter(
         process.send(subj, Nil)
       })
 
+      let count = count + 1
       process.spawn_unlinked(fn() {
         process_sync_hint(
           latest_pipe_settings_id,
@@ -1326,6 +1346,7 @@ pub fn db_receive_loop_iter(
         process.send(subj, Nil)
       })
 
+      let count = count + 1
       process.spawn_unlinked(fn() {
         process_sync_hint(
           latest_account_updated_at,
@@ -1342,9 +1363,27 @@ pub fn db_receive_loop_iter(
         process.send(subj, Nil)
       })
 
+      let count = count + 1
+      process.spawn_unlinked(fn() {
+        process_sync_hint(
+          latest_account_key_updated_at,
+          for: "account_keys",
+          with: [
+            #("id", decode.map(decode.bit_array, pturso.Blob)),
+            #("node", decode.map(decode.string, pturso.String)),
+            #("updated_at", decode.map(decode.int, pturso.Int)),
+            #("account_id", decode.map(decode.bit_array, pturso.Blob)),
+            #("jwk", decode.map(decode.bit_array, pturso.Blob) |> pturso.nullable),
+          ],
+          on: db,
+          from: me,
+          to: who,
+        )
+        process.send(subj, Nil)
+      })
+
       // Wait a little bit for each to finish
-      let _ = process.receive(subj, within: 500)
-      let _ = process.receive(subj, within: 500)
+      list.range(1, count) |> list.each(fn(_) { process.receive(subj, within: 500) })
 
       Nil
     }
