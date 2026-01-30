@@ -9,7 +9,7 @@ import gleam/http
 import gleam/int
 import gleam/json
 import gleam/list
-import gleam/option
+import gleam/option.{type Option, None}
 import gleam/otp/actor
 import gleam/result
 import gleam/string_tree
@@ -23,7 +23,7 @@ pub type Entry {
     method: http.Method,
     headers: List(http.Header),
     body: BitArray,
-    sender: option.Option(String),
+    sender: Option(String),
   )
 }
 
@@ -39,16 +39,17 @@ pub type Kind {
 }
 
 pub type Flags {
-  Flags(persisted: Bool)
+  Flags(persisted: Bool, private: Bool)
 }
 
 pub type FlagsUpdate {
-  FlagsUpdate(persisted: option.Option(Bool))
+  FlagsUpdate(persisted: Option(Bool), private: Option(Bool))
 }
 
 pub fn flags_update_decoder() -> decode.Decoder(FlagsUpdate) {
-  use persisted <- decode.field("persisted", decode.optional(decode.bool))
-  decode.success(FlagsUpdate(persisted:))
+  use persisted <- decode.optional_field("persisted", None, decode.optional(decode.bool))
+  use private <- decode.optional_field("private", None, decode.optional(decode.bool))
+  decode.success(FlagsUpdate(persisted:, private:))
 }
 
 pub fn flags_to_json(flags: Flags) -> json.Json {
@@ -56,11 +57,14 @@ pub fn flags_to_json(flags: Flags) -> json.Json {
 }
 
 pub fn default_flags() -> Flags {
-  Flags(persisted: False)
+  Flags(persisted: False, private: False)
 }
 
 pub fn parse_flags(bits: Int) -> Flags {
-  Flags(persisted: { int.bitwise_and(bits, 1) == 1 })
+  Flags(
+    persisted: { int.bitwise_and(bits, 1) == 1 },
+    private: { int.bitwise_and(bits, int.bitwise_shift_left(1, 1)) == 1 },
+  )
 }
 
 pub fn serialize_flags(flags: Flags) -> Int {

@@ -561,7 +561,7 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
       }
       use _ <- expect(
         namespace_is_ok,
-        or_return: bad_request(because: "invalid namespace")
+        or_return: bad_request(because: "namespace cannot contain '/'")
       )
 
       let body = http_wrapper.read_body(req, 1024 * 8)
@@ -592,10 +592,16 @@ fn serve_api(api_path: List(String), req: Request, state: AppState) -> Response 
         |> result.lazy_unwrap(pipe.default_flags)
 
       let new_flags =
-        pipe.Flags(persisted: option.unwrap(
-          new_flags.persisted,
-          current_flags.persisted,
-        ))
+        pipe.Flags(
+          persisted: option.unwrap(
+            new_flags.persisted,
+            current_flags.persisted,
+          ),
+          private: option.unwrap(
+            new_flags.private,
+            current_flags.private,
+          ),
+        )
 
       let id = gulid.new() |> gulid.to_bitarray
 
